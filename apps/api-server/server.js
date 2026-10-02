@@ -378,6 +378,11 @@ app.post("/api/admin/upload", requireAdmin, async (req, res) => {
 
 const ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
 const fail = (res, code, message, status = 400) => res.status(status).json({ success: false, error: { code, message } });
+// API는 절대 캐시하지 않는다 (폰 브라우저 휴리스틱 캐시로 낡은 값 표시 방지)
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 // Zod 에러를 첫 번째 항목의 한글 메시지로 변환
 const zMsg = (parsed, fallback = "입력값을 확인하세요") =>
   parsed.success ? "" : (parsed.error.issues[0]?.message || fallback);
