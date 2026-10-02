@@ -15,24 +15,36 @@ export function LauncherClient({ initialApps, initialCats, announcement, grid }:
   const router = useRouter();
   const [apps, setApps] = useState(initialApps);
   const [cats, setCats] = useState(initialCats);
+  const [announcementLive, setAnnouncement] = useState(announcement);
   const [cat, setCat] = useState("전체");
   const [q, setQ] = useState("");
 
   // 어드민 변경 실시간 반영 (30초 폴링, 화면 가림 시 중단)
+  // 브랜드·공지는 즉시 갱신, 배경·그리드 변경은 서버컴포넌트 새로고침으로 즉시 적용
   useEffect(() => {
     const t = setInterval(async () => {
       if (document.hidden) return;
       try {
-        const [a, c] = await Promise.all([
+        const [a, c, p] = await Promise.all([
           fetch("/api/apps").then((r) => r.json()),
-          fetch("/api/categories").then((r) => r.json())
+          fetch("/api/categories").then((r) => r.json()),
+          fetch("/api/platform").then((r) => r.json())
         ]);
         if (a.success) setApps(a.data);
         if (c.success) setCats(c.data);
+        if (p.success) {
+          if (typeof p.data?.announcement === "string" && p.data.announcement !== announcementLive) {
+            setAnnouncement(p.data.announcement);
+          }
+          const sig = JSON.stringify([p.data?.platformName, p.data?.backgroundType, p.data?.backgroundColor, p.data?.backgroundImage, p.data?.gridDensity, p.data?.gridCols, p.data?.showAppName, p.data?.idleTimeoutMin, p.data?.logoUrl]);
+          const prev = (window as unknown as { __platSig?: string }).__platSig;
+          if (prev && prev !== sig) router.refresh();
+          (window as unknown as { __platSig?: string }).__platSig = sig;
+        }
       } catch { /* ignore */ }
-    }, 30000);
+    }, 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [router, announcementLive]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -45,9 +57,9 @@ export function LauncherClient({ initialApps, initialCats, announcement, grid }:
 
   return (
     <>
-      {announcement && (
+      {announcementLive && (
         <p role="status" className="mb-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 min-h-[48px] flex items-center text-[clamp(14px,2vw,16px)]">
-          {announcement}
+          {announcementLive}
         </p>
       )}
       <nav className="flex gap-2 overflow-x-auto pb-2 mb-3" aria-label="카테고리 메뉴">
