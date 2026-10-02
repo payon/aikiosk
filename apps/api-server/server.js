@@ -223,10 +223,10 @@ function checkLimit(key, limit, windowMs) {
 }
 
 const AppCreateSchema = z.object({
-  name: z.string().min(1).max(100),
-  slug: z.string().regex(/^[a-z0-9-]+$/),
-  targetUrl: z.string().url(),
-  iconUrl: z.string().min(1).max(500),
+  name: z.string({ required_error: "이름을 입력하세요" }).min(1, "이름을 입력하세요").max(100, "이름은 100자 이하"),
+  slug: z.string({ required_error: "슬러그를 입력하세요" }).regex(/^[a-z0-9-]+$/, "슬러그는 영문 소문자·숫자·하이픈(-)만 입력 (예: library)"),
+  targetUrl: z.string({ required_error: "URL을 입력하세요" }).url("URL 형식이 올바르지 않습니다 (https://… 또는 허용된 http://…)"),
+  iconUrl: z.string().min(1, "아이콘 URL을 입력하세요").max(500),
   description: z.string().max(500).optional(),
   displayOrder: z.number().int().default(0),
   isActive: z.boolean().default(true),
@@ -285,7 +285,7 @@ app.post("/api/admin/upload", requireAdmin, async (req, res) => {
     filename: z.string().min(1).max(100),
     dataUrl: z.string().min(1).max(4_000_000)
   }).safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   const m = parsed.data.dataUrl.match(/^data:([a-z/+.-]+);base64,(.+)$/);
   if (!m || !UPLOAD_MIMES[m[1]]) return fail(res, "VALIDATION", "png/jpg/webp/svg만 허용", 400);
   const buf = Buffer.from(m[2], "base64");
@@ -306,6 +306,9 @@ app.post("/api/admin/upload", requireAdmin, async (req, res) => {
 
 const ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
 const fail = (res, code, message, status = 400) => res.status(status).json({ success: false, error: { code, message } });
+// Zod 에러를 첫 번째 항목의 한글 메시지로 변환
+const zMsg = (parsed, fallback = "입력값을 확인하세요") =>
+  parsed.success ? "" : (parsed.error.issues[0]?.message || fallback);
 
 function requireAdmin(req, res, next) {
   const c = verifySessionToken(req.cookies.session_token || "");
@@ -438,7 +441,7 @@ app.post("/api/admin/apps", requireAdmin, async (req, res) => {
   const ip = req.ip || "local";
   if (!checkLimit(`admin:${ip}`, 100, 60000)) return fail(res, "RATE_LIMIT", "Too many requests", 429);
   const parsed = AppCreateSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   const validNew = await validCategories();
   if (parsed.data.category && !validNew.includes(parsed.data.category)) {
     return fail(res, "VALIDATION", `카테고리는 다음 중 선택: ${validNew.join(", ")} (카테고리 메뉴에서 먼저 생성)`, 400);
@@ -463,7 +466,7 @@ app.post("/api/admin/apps", requireAdmin, async (req, res) => {
 
 app.patch("/api/admin/apps", requireAdmin, async (req, res) => {
   const parsed = AppPatchSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   const { id, ...data } = parsed.data;
   if (data.category) {
     const validUpd = await validCategories();
@@ -516,7 +519,7 @@ app.delete("/api/admin/apps", requireAdmin, async (req, res) => {
 // PATCH {from, to} 이름 변경 / DELETE ?from=&moveTo= (앱 이동 후 메뉴에서 제거)
 app.patch("/api/admin/categories", requireAdmin, async (req, res) => {
   const parsed = z.object({ from: z.string().min(1).max(50), to: z.string().min(1).max(50) }).safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   const { from, to } = parsed.data;
   if (!prisma) {
     let n = 0;
@@ -568,7 +571,7 @@ app.post("/api/admin/permissions", requireAdmin, async (req, res) => {
     email: z.string().email(), slug: z.string().min(1),
     accessLevel: z.enum(["VIEW", "ADMIN"]).default("VIEW")
   }).safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (prisma) {
     try {
       const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
@@ -628,7 +631,7 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
     password: z.string().min(8).max(100),
     role: z.enum(["ADMIN", "USER"]).default("USER")
   }).safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (prisma) {
     try {
       const created = await prisma.user.create({
@@ -656,7 +659,7 @@ app.patch("/api/admin/users", requireAdmin, async (req, res) => {
     role: z.enum(["ADMIN", "USER"]).optional(),
     password: z.string().min(8).max(100).optional()
   }).safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (parsed.data.id === req.claims.userId && parsed.data.role && parsed.data.role !== "ADMIN") {
     return fail(res, "VALIDATION", "자기 자신의 관리자 권한은 해제할 수 없음", 400);
   }
@@ -726,7 +729,7 @@ app.get("/api/admin/settings", requireAdmin, async (req, res) => ok(res, publicS
 
 app.put("/api/admin/settings", requireAdmin, async (req, res) => {
   const parsed = SettingsSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (prisma) {
     try {
       const row = await prisma.platformSetting.update({ where: { platformDomain: DOMAIN }, data: parsed.data });

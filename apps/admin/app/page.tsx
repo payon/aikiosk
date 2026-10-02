@@ -114,20 +114,28 @@ export default function Dashboard() {
     return { ok: r.ok && j.success, j };
   }
   async function saveSettings(patch: Partial<Settings>, done = "설정 저장됨 → 런처에 반영") {
-    const next = { ...settings, ...patch };
+    // 변경분만 전송 (전체 병합 시 빈 값 검증 실패 방지)
+    const body: Record<string, unknown> = { ...patch };
+    if (body.idleTimeoutMin !== undefined) body.idleTimeoutMin = Number(body.idleTimeoutMin);
     const { ok, j } = await api("/api/admin/settings", {
       method: "PUT", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ platformName: next.platformName, primaryColor: next.primaryColor, logoUrl: next.logoUrl, announcement: next.announcement, idleTimeoutMin: Number(next.idleTimeoutMin), menuOrder: next.menuOrder, backgroundType: next.backgroundType, backgroundColor: next.backgroundColor, backgroundImage: next.backgroundImage, allowedDomains: next.allowedDomains })
+      body: JSON.stringify(body)
     });
     setToast(ok ? { id: Date.now(), text: done, ok: true } : { id: Date.now(), text: j.error?.message ?? "실패", ok: false });
-    if (ok) setSettings(next);
+    if (ok) setSettings((s) => ({ ...s, ...patch }));
+  }
+
+  // 슬러그 자동 정규화: 소문자·공백→하이픈·허용문자만
+  function normSlug(v: string) {
+    return v.toLowerCase().trim().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-");
   }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
+    const slug = normSlug(form.slug) || normSlug(form.name);
     const { ok, j } = await api("/api/admin/apps", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...form, displayOrder: apps.length, isActive: true })
+      body: JSON.stringify({ ...form, slug, displayOrder: apps.length, isActive: true })
     });
     result(ok, "등록됨 → 런처에 즉시 반영", j);
     if (ok) { setForm(EMPTY_APP); load(); }
@@ -136,9 +144,10 @@ export default function Dashboard() {
   async function saveEdit(e: React.FormEvent) {
     e.preventDefault();
     if (!editing) return;
+    const slug = normSlug(editing.slug);
     const { ok, j } = await api("/api/admin/apps", {
       method: "PATCH", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: editing.id, name: editing.name, slug: editing.slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "" })
+      body: JSON.stringify({ id: editing.id, name: editing.name, slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "" })
     });
     result(ok, "수정됨 → 런처에 즉시 반영", j);
     if (ok) { setEditing(null); load(); }
@@ -343,6 +352,7 @@ export default function Dashboard() {
               {(["name", "slug", "targetUrl", "iconUrl", "description"] as const).map((k) => (
                 <input key={k} className={input} placeholder={k} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
               ))}
+              <p className="-mt-1 mb-1 text-[clamp(12px,1.5vw,14px)] text-gray-500">슬러그는 영문 소문자·숫자·하이픈만 (한글 입력 시 자동 변환, 비우면 이름에서 생성)</p>
               <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">소속 카테고리 (메뉴에 먼저 생성)
                 <select className={input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} aria-label="소속 카테고리">
                   {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
