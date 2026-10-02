@@ -16,6 +16,7 @@ export interface AppRegistry {
   bgType?: string;
   bgColor?: string;
   bgImage?: string;
+  links?: { label: string; url: string }[];
 }
 
 // uiux 3.2 대응 디바이스 프리셋 (너비 px → 기대 열수)

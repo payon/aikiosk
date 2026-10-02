@@ -19,6 +19,21 @@ export default async function SubAppPage({ params }: { params: { slug: string; p
       <a href={`/apps/${params.slug}`} className="inline-flex min-h-[48px] items-center rounded-lg bg-orange-700 text-white px-4 mt-4 text-[clamp(16px,2vw,24px)]">
         {app.name} 열기
       </a>
+      {(app.links || []).length > 0 && (
+        <div className="mt-4">
+          <h2 className="text-[clamp(16px,2vw,20px)] font-bold mb-2">관련 링크</h2>
+          <ul className="grid gap-2">
+            {(app.links || []).map((l) => (
+              <li key={l.label + l.url}>
+                <a href={l.url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex min-h-[48px] items-center rounded-lg border px-4 text-[clamp(14px,2vw,16px)]">
+                  {l.label} ↗
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </Shell>
   );
 }

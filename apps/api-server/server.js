@@ -156,6 +156,20 @@ function emailOf(userId) {
   const u = usersMem.find((x) => x.id === userId);
   return u ? u.email : undefined;
 }
+// links 정규화: DB(String[] "라벨|URL") ↔ API(객체 배열)
+function normLinks(v) {
+  if (!Array.isArray(v)) return [];
+  return v.map((s) => {
+    if (s && typeof s === "object" && s.label) return { label: String(s.label), url: String(s.url || "#") };
+    const str = String(s);
+    const i = str.indexOf("|");
+    return i < 0 ? { label: str, url: "#" } : { label: str.slice(0, i), url: str.slice(i + 1) };
+  });
+}
+const linksToDb = (links) => (links || []).map((l) => `${l.label}|${l.url}`);
+function withLinks(row) {
+  return { ...row, links: normLinks(row.links) };
+}
 try {
   const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   if (Array.isArray(saved.store) && saved.store.length) store = saved.store;
@@ -167,11 +181,12 @@ try {
 } catch { /* 첫 실행 */ }
 
 async function getAllApps() {
-  if (!prisma) return store;
+  if (!prisma) return store.map(withLinks);
   try {
-    return await prisma.application.findMany({ orderBy: { displayOrder: "asc" } });
+    const rows = await prisma.application.findMany({ orderBy: { displayOrder: "asc" } });
+    return rows.map(withLinks);
   } catch {
-    return store;
+    return store.map(withLinks);
   }
 }
 async function getSettings() {
@@ -222,6 +237,14 @@ function checkLimit(key, limit, windowMs) {
   return cur.count <= limit;
 }
 
+const LinkSchema = z.object({
+  label: z.string().min(1, "링크 이름을 입력하세요").max(50),
+  url: z.string().min(1, "링크 URL을 입력하세요").max(500).refine(
+    (v) => v.startsWith("https://") || v.startsWith("http://localhost") || v.startsWith("http://127.0.0.1") || v.startsWith("/") || v.startsWith("http://rustkorea.cloud") || /^http:\/\/[^/]*\.rustkorea\.cloud/.test(v),
+    { message: "링크는 https:// 또는 내부 http(s), / 로 시작해야 합니다" }
+  )
+});
+
 const AppCreateSchema = z.object({
   name: z.string({ required_error: "이름을 입력하세요" }).min(1, "이름을 입력하세요").max(100, "이름은 100자 이하"),
   slug: z.string({ required_error: "슬러그를 입력하세요" }).regex(/^[a-z0-9-]+$/, "슬러그는 영문 소문자·숫자·하이픈(-)만 입력 (예: library)"),
@@ -238,7 +261,8 @@ const AppCreateSchema = z.object({
   bgImage: z.string().max(500).default("").refine(
     (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
     { message: "배경 이미지는 /uploads/ 또는 https:// 만 허용" }
-  )
+  ),
+  links: z.array(LinkSchema).max(5).default([]) // 관련 링크 (라벨+URL, 최대 5개)
 });
 const AppPatchSchema = z.object({
   id: z.string().min(1),
@@ -256,7 +280,8 @@ const AppPatchSchema = z.object({
   bgImage: z.string().max(500).optional().refine(
     (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
     { message: "배경 이미지는 /uploads/ 또는 https:// 만 허용" }
-  )
+  ),
+  links: z.array(LinkSchema).max(5).optional()
 });
 const LoginSchema = z.object({ email: z.string().email(), password: z.string().min(8) });
 
@@ -279,6 +304,19 @@ const UPLOAD_MIMES = {
   "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/svg+xml": "svg"
 };
 
+// webp 변환 (sharp 있으면, 없으면 원본 저장)
+async function toWebp(buf, destPath) {
+  try {
+    const sharp = require("sharp");
+    await sharp(buf).resize({ width: 1024, withoutEnlargement: true }).webp({ quality: 80 }).toFile(destPath);
+    const st = require("fs").statSync(destPath);
+    return st.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+
 // POST /api/admin/upload {filename, dataUrl} → {url} (ADMIN, 1.5MB 이하)
 app.post("/api/admin/upload", requireAdmin, async (req, res) => {
   const parsed = z.object({
@@ -294,14 +332,29 @@ app.post("/api/admin/upload", requireAdmin, async (req, res) => {
     const text = buf.toString("utf8");
     if (/<script|on\w+\s*=|javascript:/i.test(text)) return fail(res, "VALIDATION", "SVG에 스크립트 불가", 400);
   }
-  const safe = `${Date.now()}-${Math.random().toString(36).slice(2)}.${UPLOAD_MIMES[m[1]]}`;
-  try {
-    require("fs").writeFileSync(path.join(UPLOAD_DIR, safe), buf);
-  } catch {
-    return fail(res, "IO", "저장 실패", 500);
+  const base = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // webp로 규격 변환 (벡터 SVG 제외). 실패 시 원본 저장.
+  let stored = `${base}.${UPLOAD_MIMES[m[1]]}`;
+  if (m[1] !== "image/svg+xml" && m[1] !== "image/webp") {
+    const webp = path.join(UPLOAD_DIR, `${base}.webp`);
+    if (await toWebp(buf, webp)) {
+      stored = `${base}.webp`;
+    } else {
+      try {
+        require("fs").writeFileSync(path.join(UPLOAD_DIR, stored), buf);
+      } catch {
+        return fail(res, "IO", "저장 실패", 500);
+      }
+    }
+  } else {
+    try {
+      require("fs").writeFileSync(path.join(UPLOAD_DIR, stored), buf);
+    } catch {
+      return fail(res, "IO", "저장 실패", 500);
+    }
   }
-  await audit(req.claims.userId, "icon.upload", safe, "success");
-  return ok(res, { url: `/uploads/${safe}` }, 201);
+  await audit(req.claims.userId, "icon.upload", stored, "success");
+  return ok(res, { url: `/uploads/${stored}` }, 201);
 });
 
 const ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
@@ -459,9 +512,9 @@ app.post("/api/admin/apps", requireAdmin, async (req, res) => {
     await audit(req.claims.userId, "app.register", row.slug, "success");
     return ok(res, row, 201);
   }
-  const created = await prisma.application.create({ data: parsed.data });
+  const created = await prisma.application.create({ data: { ...parsed.data, links: linksToDb(parsed.data.links) } });
   await audit(req.claims.userId, "app.register", created.slug, "success");
-  return ok(res, created, 201);
+  return ok(res, withLinks(created), 201);
 });
 
 app.patch("/api/admin/apps", requireAdmin, async (req, res) => {
@@ -492,9 +545,11 @@ app.patch("/api/admin/apps", requireAdmin, async (req, res) => {
     return ok(res, store[i]);
   }
   try {
-    const updated = await prisma.application.update({ where: { id }, data });
+    const dbData = { ...data };
+    if (dbData.links) dbData.links = linksToDb(dbData.links);
+    const updated = await prisma.application.update({ where: { id }, data: dbData });
     await audit(req.claims.userId, "app.update", id, "success");
-    return ok(res, updated);
+    return ok(res, withLinks(updated));
   } catch {
     return fail(res, "NOT_FOUND", "앱 없음", 404);
   }

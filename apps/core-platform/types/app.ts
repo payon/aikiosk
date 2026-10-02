@@ -12,6 +12,7 @@ export interface AppRegistry {
   bgType?: string;
   bgColor?: string;
   bgImage?: string;
+  links?: { label: string; url: string }[];
 }
 
 export interface ShellLayoutProps {

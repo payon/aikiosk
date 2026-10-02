@@ -34,6 +34,7 @@ model Application {
   bgType       String                 @default("color")
   bgColor      String                 @default("#FFFFFF")
   bgImage      String                 @default("")
+  links        String[]            @default([])
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
   permissions  UserAppPermission[]

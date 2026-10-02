@@ -147,7 +147,7 @@ export default function Dashboard() {
     const slug = normSlug(editing.slug);
     const { ok, j } = await api("/api/admin/apps", {
       method: "PATCH", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: editing.id, name: editing.name, slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "" })
+      body: JSON.stringify({ id: editing.id, name: editing.name, slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "", links: (editing.links || []).filter((l) => l.label.trim() && l.url.trim()) })
     });
     result(ok, "수정됨 → 런처에 즉시 반영", j);
     if (ok) { setEditing(null); load(); }
@@ -421,6 +421,22 @@ export default function Dashboard() {
                   <label className="flex items-center gap-2 min-h-[48px] text-[clamp(14px,2vw,16px)]">
                     <input type="checkbox" className="w-6 h-6" checked={!!editing.stripPrefix} onChange={(e) => setEditing({ ...editing, stripPrefix: e.target.checked })} />
                     루트형 앱 (상대가 basePath 없이 동작 → /apps/슬러그 제거 후 전달)
+                  </label>
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">관련 링크 (최대 5개)
+                    <span className="grid gap-2">
+                      {(editing.links || []).map((l, i) => (
+                        <span key={i} className="flex gap-1">
+                          <input className={`${input} flex-1`} placeholder="이름" value={l.label}
+                            onChange={(e) => setEditing({ ...editing, links: (editing.links || []).map((x, j) => j === i ? { ...x, label: e.target.value } : x) })} aria-label="링크 이름" />
+                          <input className={`${input} flex-[2]`} placeholder="https://…" value={l.url}
+                            onChange={(e) => setEditing({ ...editing, links: (editing.links || []).map((x, j) => j === i ? { ...x, url: e.target.value } : x) })} aria-label="링크 URL" />
+                          <button type="button" className={btn} onClick={() => setEditing({ ...editing, links: (editing.links || []).filter((_, j) => j !== i) })} aria-label="링크 삭제">✕</button>
+                        </span>
+                      ))}
+                      {(editing.links || []).length < 5 && (
+                        <button type="button" className={btn} onClick={() => setEditing({ ...editing, links: [...(editing.links || []), { label: "", url: "" }] })}>+ 링크 추가</button>
+                      )}
+                    </span>
                   </label>
                   <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">열기 방식
                     <select className={input} value={editing.openMode || "embed"} onChange={(e) => setEditing({ ...editing, openMode: e.target.value as "embed" | "direct" })} aria-label="열기 방식">
