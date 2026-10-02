@@ -453,7 +453,7 @@ app.post("/api/auth/login", async (req, res) => {
         } catch { /* ignore */ }
         await audit(user.id, "auth.login", undefined, "success");
         res.cookie("session_token", createSessionToken(user.id, user.role), {
-          httpOnly: true, secure: IS_PROD, sameSite: "lax", path: "/", maxAge: MAX_AGE * 1000
+          httpOnly: true, secure: req.protocol === "https", sameSite: "lax", path: "/", maxAge: MAX_AGE * 1000
         });
         return ok(res, { role: user.role });
       }
@@ -465,7 +465,7 @@ app.post("/api/auth/login", async (req, res) => {
     const u = usersMem.find((x) => x.email === email);
     if (u && (await bcrypt.compare(password, u.passwordHash))) {
       res.cookie("session_token", createSessionToken(u.id, u.role), {
-        httpOnly: true, secure: IS_PROD, sameSite: "lax", path: "/", maxAge: MAX_AGE * 1000
+        httpOnly: true, secure: req.protocol === "https", sameSite: "lax", path: "/", maxAge: MAX_AGE * 1000
       });
       return ok(res, { role: u.role });
     }
