@@ -20,6 +20,7 @@ interface AuditRow { id: string; actorId: string; action: string; target?: strin
 interface Perm { email: string; slug: string; accessLevel: string; }
 interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
+interface Device { id: string; uuid: string; name: string; code: string; status: string; lastSeen: string; createdAt: string; }
 
 const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct"; bgType: string; bgColor: string; bgImage: string } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed", bgType: "color", bgColor: "#FFFFFF", bgImage: "" };
 
@@ -32,6 +33,7 @@ export default function Dashboard() {
   const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true, pwaIconUrl: "", adminMenu: [] });
   const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
@@ -119,6 +121,10 @@ export default function Dashboard() {
     fetch("/api/admin/users").then(async (r) => {
       const j = await r.json();
       if (j.success) setUsers(j.data);
+    }).catch(() => {});
+    fetch("/api/admin/devices").then(async (r) => {
+      const j = await r.json();
+      if (j.success) setDevices(j.data);
     }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
@@ -226,6 +232,21 @@ export default function Dashboard() {
     if (ok) load();
   }
 
+  async function setDevice(uuid: string, data: { status?: string; name?: string; assignedSlug?: string }, done = "장비 상태 변경됨") {
+    const { ok, j } = await api("/api/admin/devices", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ uuid, ...data })
+    });
+    result(ok, done, j);
+    if (ok) load();
+  }
+
+  async function removeDevice(uuid: string) {
+    if (!confirm("장비를 삭제할까요?")) return;
+    const r = await fetch(`/api/admin/devices?uuid=${encodeURIComponent(uuid)}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    result(r.ok && j.success, "장비 삭제됨", j);
+    if (r.ok) load();
+  }
   async function removeUser(id: string, email: string) {
     if (!confirm(`${email} 사용자를 삭제할까요?`)) return;
     const r = await fetch(`/api/admin/users?id=${id}`, { method: "DELETE" });
@@ -528,6 +549,33 @@ export default function Dashboard() {
             <div className="max-w-lg bg-white border rounded-2xl p-4">
               <input className={`${input} w-full`} placeholder="이동처 카테고리 (기본: 전체)" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="이동처 카테고리" />
             </div>
+          </section>
+        )}
+
+        {tab === "devices" && (
+          <section>
+            <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">장비 관리</h1>
+            <p className="text-[clamp(14px,2vw,16px)] text-gray-600 mb-3">키오스크 PWA 첫 실행 시 발급된 인증 코드를 확인하고 승인하세요. 승인된 장비만 정식 운영 대상으로 집계됩니다.</p>
+            <ul className="grid gap-2">
+              {devices.map((d) => (
+                <li key={d.id} className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-2 text-[clamp(14px,2vw,16px)]">
+                  <span className="flex-1 min-w-[200px]">
+                    <b>{d.name}</b> · 코드 <b className="tracking-widest">{d.code}</b> · {d.status === "approved" ? "승인됨" : d.status === "rejected" ? "거부됨" : "대기"}
+                    <span className="block text-[clamp(11px,1.5vw,13px)] text-gray-500 font-mono break-all">{d.uuid}</span>
+                  </span>
+                  <select className={input} value={(d as Device & { assignedSlug?: string }).assignedSlug || ""} 
+                    onChange={(e) => setDevice(d.uuid, { assignedSlug: e.target.value }, "표시 화면 지정됨")}
+                    aria-label={`${d.name} 표시 화면`}>
+                    <option value="">화면 미지정</option>
+                    {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name} ({a.slug})</option>)}
+                  </select>
+                  <button className={btn} onClick={() => setDevice(d.uuid, { status: "approved" }, "장비 승인됨")}>승인</button>
+                  <button className={btn} onClick={() => setDevice(d.uuid, { status: "rejected" }, "장비 거부됨")}>거부</button>
+                  <button className={btn} onClick={() => removeDevice(d.uuid)}>삭제</button>
+                </li>
+              ))}
+              {devices.length === 0 && <li className="text-gray-500">등록된 장비 없음 — 런처 /device 화면을 열면 여기 표시됩니다</li>}
+            </ul>
           </section>
         )}
 

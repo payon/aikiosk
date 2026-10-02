@@ -144,11 +144,25 @@ const DEFAULT_ADMIN_MENU = [
   { id: "overview", label: "대시보드" },
   { id: "categories", label: "카테고리 관리" },
   { id: "apps", label: "앱 관리" },
+  { id: "devices", label: "장비 관리" },
   { id: "users", label: "사용자" },
   { id: "permissions", label: "권한" },
   { id: "settings", label: "설정" },
   { id: "audit", label: "감사 로그" }
 ];
+// 구 메뉴(장비 항목 없음)에 새 항목 자동 병합
+function mergeMenu(saved) {
+  const base = Array.isArray(saved) && saved.length ? saved : DEFAULT_ADMIN_MENU;
+  const ids = new Set(base.map((m) => m.id));
+  const merged = [...base];
+  for (const d of DEFAULT_ADMIN_MENU) {
+    if (!ids.has(d.id)) {
+      const at = d.id === "devices" ? 3 : merged.length;
+      merged.splice(Math.min(at, merged.length), 0, { ...d });
+    }
+  }
+  return merged.filter((m) => DEFAULT_ADMIN_MENU.some((d) => d.id === m.id));
+}
 let settingsMem = {
   platformDomain: DOMAIN, platformName: "러스트코리아", primaryColor: "#C2410C",
   logoUrl: "/logo.svg", allowedDomains: [DOMAIN],
@@ -189,6 +203,7 @@ try {
   if (Array.isArray(saved.auditMem)) auditMem = saved.auditMem;
   if (saved.settingsMem) settingsMem = { ...settingsMem, ...saved.settingsMem };
   if (Array.isArray(saved.usersMem) && saved.usersMem.length) usersMem = saved.usersMem;
+  if (Array.isArray(saved.devicesMem)) devicesMem = saved.devicesMem;
   console.log("[persist] restored");
 } catch { /* 첫 실행 */ }
 
@@ -223,7 +238,7 @@ function publicSettings(s) {
     gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(s.gridCols || {}) },
     showAppName: s.showAppName !== false,
     pwaIconUrl: s.pwaIconUrl || "",
-    adminMenu: Array.isArray(s.adminMenu) && s.adminMenu.length ? s.adminMenu : DEFAULT_ADMIN_MENU
+    adminMenu: mergeMenu(Array.isArray(s.adminMenu) && s.adminMenu.length ? s.adminMenu : DEFAULT_ADMIN_MENU)
   };
 }
 async function audit(actorId, action, target, result) {
@@ -314,7 +329,7 @@ app.use("/subapps", express.static(path.join(__dirname, "subapps")));
 // (경로 상수는 파일 상단 store 선언부에서 정의 — TDZ 방지)
 function persist() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem }));
   } catch (e) { console.log("[persist] fail", e.message); }
 }
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: false }));
@@ -686,6 +701,130 @@ app.delete("/api/admin/permissions", requireAdmin, async (req, res) => {
   }
   permMem = permMem.filter((p) => !(p.email === email && p.slug === slug));
   await audit(req.claims.userId, "permission.revoke", `${email}:${slug}`, "success");
+  return ok(res, null);
+});
+
+// ----- 장비 관리 (사이니지형 승인제) -----
+// 브라우저 PWA는 하드웨어 UUID를 읽을 수 없어 설치 시 발급한 UUID + 페어링 코드로 승인.
+// devicesMem: {id, uuid, name, code, status: pending|approved|rejected, lastSeen, createdAt}
+let devicesMem = [];
+function deviceCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+// POST /api/device/register {uuid, name?, info?} → {code, status}
+app.post("/api/device/register", async (req, res) => {
+  const parsed = z.object({
+    uuid: z.string().min(8).max(100),
+    name: z.string().max(100).optional(),
+    info: z.string().max(300).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  if (prisma) {
+    try {
+      const row = await prisma.device.upsert({
+        where: { uuid: parsed.data.uuid },
+        update: { name: parsed.data.name, lastSeen: new Date() },
+        create: { uuid: parsed.data.uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", lastSeen: new Date() }
+      });
+      return ok(res, { code: row.code, status: row.status });
+    } catch { /* fallthrough */ }
+  }
+  let d = devicesMem.find((x) => x.uuid === parsed.data.uuid);
+  if (!d) {
+    d = { id: `d-${Date.now()}`, uuid: parsed.data.uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", lastSeen: new Date().toISOString(), createdAt: new Date().toISOString() };
+    devicesMem.push(d);
+  } else {
+    d.lastSeen = new Date().toISOString();
+    if (parsed.data.name) d.name = parsed.data.name;
+  }
+  persist();
+  return ok(res, { code: d.code, status: d.status });
+});
+
+// GET /api/device/status?uuid= → {status}
+app.get("/api/device/status", async (req, res) => {
+  const uuid = String(req.query.uuid || "");
+  if (!uuid) return fail(res, "VALIDATION", "uuid required", 400);
+  if (prisma) {
+    try {
+      const row = await prisma.device.findUnique({ where: { uuid } });
+      if (row) return ok(res, { status: row.status, code: row.code, assignedSlug: row.assignedSlug || "" });
+    } catch { /* fallthrough */ }
+  }
+  const d = devicesMem.find((x) => x.uuid === uuid);
+  if (!d) return fail(res, "NOT_FOUND", "미등록 장비", 404);
+  return ok(res, { status: d.status, code: d.code, assignedSlug: d.assignedSlug || "" });
+});
+
+// POST /api/device/heartbeat {uuid}
+app.post("/api/device/heartbeat", async (req, res) => {
+  const uuid = String((req.body || {}).uuid || "");
+  if (!uuid) return fail(res, "VALIDATION", "uuid required", 400);
+  if (prisma) {
+    try {
+      await prisma.device.update({ where: { uuid }, data: { lastSeen: new Date() } });
+      return ok(res, null);
+    } catch { /* fallthrough */ }
+  }
+  const d = devicesMem.find((x) => x.uuid === uuid);
+  if (d) { d.lastSeen = new Date().toISOString(); persist(); }
+  return ok(res, null);
+});
+
+// ----- Admin: devices -----
+app.get("/api/admin/devices", requireAdmin, async (req, res) => {
+  if (prisma) {
+    try {
+      const rows = await prisma.device.findMany({ orderBy: { createdAt: "desc" } });
+      return ok(res, rows);
+    } catch { /* fallthrough */ }
+  }
+  return ok(res, devicesMem);
+});
+
+app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    uuid: z.string().min(1),
+    status: z.enum(["pending", "approved", "rejected"]).optional(),
+    name: z.string().max(100).optional(),
+    assignedSlug: z.string().max(50).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  if (prisma) {
+    try {
+      const data = {};
+      if (parsed.data.status) data.status = parsed.data.status;
+      if (parsed.data.name !== undefined) data.name = parsed.data.name;
+      if (parsed.data.assignedSlug !== undefined) data.assignedSlug = parsed.data.assignedSlug;
+      const row = await prisma.device.update({ where: { uuid: parsed.data.uuid }, data });
+      await audit(req.claims.userId, "device.update", parsed.data.uuid, "success");
+      return ok(res, row);
+    } catch {
+      return fail(res, "NOT_FOUND", "장비 없음", 404);
+    }
+  }
+  const d = devicesMem.find((x) => x.uuid === parsed.data.uuid);
+  if (!d) return fail(res, "NOT_FOUND", "장비 없음", 404);
+  if (parsed.data.status) d.status = parsed.data.status;
+  if (parsed.data.name !== undefined) d.name = parsed.data.name;
+  if (parsed.data.assignedSlug !== undefined) d.assignedSlug = parsed.data.assignedSlug;
+  persist();
+  await audit(req.claims.userId, "device.update", d.uuid, "success");
+  return ok(res, d);
+});
+
+app.delete("/api/admin/devices", requireAdmin, async (req, res) => {
+  const { uuid } = req.query;
+  if (!uuid) return fail(res, "VALIDATION", "uuid required", 400);
+  if (prisma) {
+    try {
+      await prisma.device.delete({ where: { uuid: String(uuid) } });
+    } catch { /* ignore */ }
+  }
+  devicesMem = devicesMem.filter((x) => x.uuid !== String(uuid));
+  persist();
+  await audit(req.claims.userId, "device.delete", String(uuid), "success");
   return ok(res, null);
 });
 

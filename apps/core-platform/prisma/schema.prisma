@@ -98,6 +98,19 @@ model AuditLog {
   @@index([actorId, createdAt])
 }
 
+model Device {
+  id           String   @id @default(uuid())
+  uuid         String   @unique
+  name         String   @default("미지정 장비")
+  code         String
+  status       String   @default("pending")
+  assignedSlug String   @default("")
+  lastSeen     DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@index([status])
+}
+
 enum Role {
   ADMIN
   USER
