@@ -95,6 +95,9 @@ export function LauncherClient({ initialApps, initialCats, announcement, grid, i
           config={grid}
           onAppClick={(slug) => {
             const app = filtered.find((a) => a.slug === slug);
+            if (!app) return;
+            // 템플릿 등 상대경로 target은 그대로 이동 (단일 오리진 유지)
+            if (app.targetUrl.startsWith("/")) { router.push(app.targetUrl); return; }
             if (app?.openMode === "direct") {
               // 새 탭: 런처 유지. 같은 탭: 히스토리에 남아 뒤로가기로 복귀.
               if (app.openTarget === "blank") window.open(app.targetUrl, "_blank", "noopener");

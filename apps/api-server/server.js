@@ -137,6 +137,8 @@ let store = [
   { id: "seed-2", name: "AI Platform", slug: "aiplatform", targetUrl: seedTarget("aiplatform"), iconUrl: "/icons/ai.svg", description: "AI 챗·솔루션 허브", displayOrder: 1, isActive: true, category: "AI" },
   { id: "seed-3", name: "헬스케어", slug: "healthcare", targetUrl: seedTarget("healthcare"), iconUrl: "/icons/health.svg", description: "건강 대시보드", displayOrder: 2, isActive: true, category: "헬스케어" }
 ];
+let templatesMem = [];
+let eventsMem = [];
 // 인메모리 권한 (DB 없을 때 CRUD 시연용). seed-admin은 전체, demo-user는 library만.
 let permMem = [{ email: "user@rustkorea.cloud", slug: "library", accessLevel: "VIEW" }];
 let auditMem = [];
@@ -144,6 +146,8 @@ const DEFAULT_ADMIN_MENU = [
   { id: "overview", label: "대시보드" },
   { id: "categories", label: "카테고리 관리" },
   { id: "apps", label: "앱 관리" },
+  { id: "templates", label: "템플릿" },
+  { id: "stats", label: "현황" },
   { id: "devices", label: "장비 관리" },
   { id: "users", label: "사용자" },
   { id: "permissions", label: "권한" },
@@ -204,16 +208,29 @@ try {
   if (saved.settingsMem) settingsMem = { ...settingsMem, ...saved.settingsMem };
   if (Array.isArray(saved.usersMem) && saved.usersMem.length) usersMem = saved.usersMem;
   if (Array.isArray(saved.devicesMem)) devicesMem = saved.devicesMem;
+  if (Array.isArray(saved.templatesMem)) templatesMem = saved.templatesMem;
+  if (Array.isArray(saved.eventsMem)) eventsMem = saved.eventsMem;
   console.log("[persist] restored");
 } catch { /* 첫 실행 */ }
 
 async function getAllApps() {
-  if (!prisma) return store.map(withLinks);
+  // 앱 + 게시된 템플릿(런처 그리드·카테고리·장비배정에 그대로 노출)
+  const tplRows = async () => {
+    if (prisma) {
+      try {
+        const rows = await prisma.template.findMany({ where: { status: "published" } });
+        return rows.map((r) => toAppRow({ ...r, ...(JSON.parse(r.body || '{"pages":[]}')) }));
+      } catch { /* fallthrough */ }
+    }
+    return templatesMem.filter((t) => t.status === "published").map(toAppRow);
+  };
+  const tpls = await tplRows();
+  if (!prisma) return [...store.map(withLinks), ...tpls];
   try {
     const rows = await prisma.application.findMany({ orderBy: { displayOrder: "asc" } });
-    return rows.map(withLinks);
+    return [...rows.map(withLinks), ...tpls];
   } catch {
-    return store.map(withLinks);
+    return [...store.map(withLinks), ...tpls];
   }
 }
 async function getSettings() {
@@ -329,7 +346,7 @@ app.use("/subapps", express.static(path.join(__dirname, "subapps")));
 // (경로 상수는 파일 상단 store 선언부에서 정의 — TDZ 방지)
 function persist() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem, templatesMem, eventsMem: eventsMem.slice(-1000) }));
   } catch (e) { console.log("[persist] fail", e.message); }
 }
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: false }));
@@ -875,6 +892,309 @@ app.delete("/api/admin/devices", requireAdmin, async (req, res) => {  const { uu
   persist();
   await audit(req.claims.userId, "device.delete", String(uuid), "success");
   return ok(res, null);
+});
+
+// ----- 템플릿 (키오스크 화면 에디터용 JSON) -----
+// Template {id, slug, name, category, status: draft|published, version, pages, completePageId, updatedAt}
+// Page {id, title, components: [{id, type: text|button|image|video|nav, props}]}
+// 버전 롤백: versions 배열에 게시 스냅샷 보관 (최대 20)
+function templatePublic(t) {
+  const { pages, ...rest } = t;
+  return { ...rest, pageCount: (pages || []).length };
+}
+function toAppRow(t) {
+  return {
+    id: `tpl-${t.id}`, name: t.name, slug: `t-${t.slug}`, targetUrl: `/t/${t.slug}`,
+    iconUrl: "/icons/app.svg", description: `템플릿 v${t.version}`, displayOrder: 900,
+    isActive: true, category: t.category || "전체", openMode: "embed", links: []
+  };
+}
+
+// 명도 대비율 (WCAG)
+function luminance(hex) {
+  const c = hex.replace("#", "");
+  const v = [0, 2, 4].map((i) => {
+    const x = parseInt(c.substr(i, 2), 16) / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+}
+function contrastRatio(a, b) {
+  try {
+    const l1 = luminance(a), l2 = luminance(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  } catch { return 0; }
+}
+// 접근성 게이트: 게시 전 자동 검증 (차단: errors, 경고: warnings)
+function validateTemplate(t) {
+  const errors = [], warnings = [];
+  if (!t.pages || !t.pages.length) errors.push({ message: "페이지가 없습니다" });
+  for (const p of t.pages || []) {
+    for (const c of p.components || []) {
+      const pr = c.props || {};
+      if (c.type === "button") {
+        const w = Number(pr.width || 0), h = Number(pr.height || 0);
+        if ((w && w < 48) || (h && h < 48)) errors.push({ page: p.title, message: `버튼 "${pr.label || c.id}" 터치 영역 48px 미만` });
+        if (pr.bg && pr.color && contrastRatio(pr.bg, pr.color) < 4.5) errors.push({ page: p.title, message: `버튼 "${pr.label || c.id}" 명도 대비 4.5:1 미만` });
+        if (!pr.tts) warnings.push({ page: p.title, message: `버튼 "${pr.label || c.id}" TTS 안내 없음` });
+      }
+      if (c.type === "text") {
+        if (pr.bg && pr.color && contrastRatio(pr.bg, pr.color) < 4.5) errors.push({ page: p.title, message: `텍스트 명도 대비 4.5:1 미만` });
+      }
+    }
+  }
+  return { passed: errors.length === 0, errors, warnings };
+}
+
+const TemplateSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9-]+$/, "슬러그는 영문 소문자·숫자·하이픈만").optional(),
+  name: z.string().min(1, "이름을 입력하세요").max(100).optional(),
+  category: z.string().max(50).optional(),
+  pages: z.array(z.object({
+    id: z.string().min(1), title: z.string().max(100),
+    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav"]), props: z.record(z.any()).default({}) })).default([])
+  })).max(30).optional(),
+  completePageId: z.string().max(100).nullable().optional()
+});
+
+// GET /api/admin/templates (전체) — ADMIN
+app.get("/api/admin/templates", requireAdmin, async (req, res) => {
+  if (prisma) {
+    try {
+      const rows = await prisma.template.findMany({ orderBy: { updatedAt: "desc" } });
+      return ok(res, rows.map((r) => templatePublic({ ...r, pages: JSON.parse(r.body) })));
+    } catch { /* fallthrough */ }
+  }
+  return ok(res, templatesMem.map(templatePublic));
+});
+
+// POST /api/admin/templates {name, slug?, category?} — ADMIN
+app.post("/api/admin/templates", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    name: z.string().min(1, "이름을 입력하세요").max(100),
+    slug: z.string().regex(/^[a-z0-9-]+$/, "슬러그는 영문 소문자·숫자·하이픈만").optional(),
+    category: z.string().max(50).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const valid = await validCategories();
+  const category = parsed.data.category || "전체";
+  if (!valid.includes(category)) return fail(res, "VALIDATION", `카테고리는 다음 중 선택: ${valid.join(", ")}`, 400);
+  const slug = parsed.data.slug || `tpl-${Date.now().toString(36)}`;
+  if (prisma) {
+    try {
+      const row = await prisma.template.create({
+        data: { slug, name: parsed.data.name, category, status: "draft", version: 0, body: JSON.stringify({ pages: [], completePageId: null }) }
+      });
+      await audit(req.claims.userId, "template.create", slug, "success");
+      return ok(res, templatePublic({ ...row, pages: [] }), 201);
+    } catch {
+      return fail(res, "CONFLICT", "슬러그 중복", 409);
+    }
+  }
+  if (templatesMem.some((t) => t.slug === slug)) return fail(res, "CONFLICT", "슬러그 중복", 409);
+  const row = { id: `t-${Date.now()}`, slug, name: parsed.data.name, category, status: "draft", version: 0, pages: [], completePageId: null, versions: [], updatedAt: new Date().toISOString() };
+  templatesMem.push(row);
+  persist();
+  await audit(req.claims.userId, "template.create", slug, "success");
+  return ok(res, templatePublic(row), 201);
+});
+
+// PATCH /api/admin/templates {id, name?, category?, pages?, completePageId?} — ADMIN (초안 저장)
+app.patch("/api/admin/templates", requireAdmin, async (req, res) => {
+  const parsed = TemplateSchema.extend({ id: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const { id, ...data } = parsed.data;
+  if (data.category) {
+    const valid = await validCategories();
+    if (!valid.includes(data.category)) return fail(res, "VALIDATION", `카테고리는 다음 중 선택: ${valid.join(", ")}`, 400);
+  }
+  const applyMem = () => {
+    const t = templatesMem.find((x) => x.id === id);
+    if (!t) return null;
+    Object.assign(t, data, { updatedAt: new Date().toISOString() });
+    persist();
+    return t;
+  };
+  if (prisma) {
+    try {
+      const dbData = { ...data };
+      if (dbData.pages) { dbData.body = JSON.stringify({ pages: dbData.pages, completePageId: dbData.completePageId ?? undefined }); delete dbData.pages; delete dbData.completePageId; }
+      const row = await prisma.template.update({ where: { id }, data: dbData });
+      await audit(req.claims.userId, "template.update", row.slug, "success");
+      const full = { ...row, ...(JSON.parse(row.body || '{"pages":[]}')) };
+      return ok(res, templatePublic(full));
+    } catch { /* fallthrough to mem */ }
+  }
+  const t = applyMem();
+  if (!t) return fail(res, "NOT_FOUND", "템플릿 없음", 404);
+  await audit(req.claims.userId, "template.update", t.slug, "success");
+  return ok(res, templatePublic(t));
+});
+
+// POST /api/admin/templates/publish {id} — 접근성 게이트 통과 시 게시 + 버전 기록
+app.post("/api/admin/templates/publish", requireAdmin, async (req, res) => {
+  const { id } = req.body || {};
+  const find = async () => {
+    if (prisma) {
+      try {
+        const row = await prisma.template.findUnique({ where: { id } });
+        if (row) return { ...row, ...(JSON.parse(row.body || '{"pages":[]}')) };
+      } catch { /* fallthrough */ }
+    }
+    return templatesMem.find((x) => x.id === id);
+  };
+  const t = await find();
+  if (!t) return fail(res, "NOT_FOUND", "템플릿 없음", 404);
+  const v = validateTemplate(t);
+  if (!v.passed) return fail(res, "A11Y", `접근성 미달: ${v.errors.map((e) => e.message).join("; ")}`, 422);
+  t.version = (t.version || 0) + 1;
+  t.status = "published";
+  t.updatedAt = new Date().toISOString();
+  const snap = JSON.parse(JSON.stringify({ version: t.version, pages: t.pages, completePageId: t.completePageId, at: t.updatedAt }));
+  if (prisma) {
+    try {
+      await prisma.template.update({ where: { id }, data: { status: "published", version: t.version, body: JSON.stringify({ pages: t.pages, completePageId: t.completePageId }) } });
+      await prisma.templateVersion.create({ data: { templateId: id, version: t.version, body: JSON.stringify(snap) } });
+      const vers = await prisma.templateVersion.findMany({ where: { templateId: id }, orderBy: { version: "desc" }, take: 20 });
+      await audit(req.claims.userId, "template.publish", `${t.slug}@v${t.version}`, "success");
+      return ok(res, { ...templatePublic(t), warnings: v.warnings, versions: vers.map((x) => x.version) });
+    } catch { /* fallthrough */ }
+  }
+  t.versions = t.versions || [];
+  t.versions.unshift(snap);
+  t.versions = t.versions.slice(0, 20);
+  persist();
+  await audit(req.claims.userId, "template.publish", `${t.slug}@v${t.version}`, "success");
+  return ok(res, { ...templatePublic(t), warnings: v.warnings, versions: t.versions.map((x) => x.version) });
+});
+
+// POST /api/admin/templates/rollback {id, version} — 원클릭 롤백
+app.post("/api/admin/templates/rollback", requireAdmin, async (req, res) => {
+  const { id, version } = req.body || {};
+  if (prisma) {
+    try {
+      const ver = await prisma.templateVersion.findFirst({ where: { templateId: id, version: Number(version) } });
+      if (!ver) return fail(res, "NOT_FOUND", "버전 없음", 404);
+      const snap = JSON.parse(ver.body);
+      await prisma.template.update({ where: { id }, data: { status: "published", body: JSON.stringify({ pages: snap.pages, completePageId: snap.completePageId }) } });
+      await audit(req.claims.userId, "template.rollback", `${id}@v${version}`, "success");
+      return ok(res, { rolledBack: Number(version) });
+    } catch { /* fallthrough */ }
+  }
+  const t = templatesMem.find((x) => x.id === id);
+  const snap = t && (t.versions || []).find((x) => x.version === Number(version));
+  if (!snap) return fail(res, "NOT_FOUND", "버전 없음", 404);
+  t.pages = JSON.parse(JSON.stringify(snap.pages));
+  t.completePageId = snap.completePageId;
+  t.status = "published";
+  t.updatedAt = new Date().toISOString();
+  persist();
+  await audit(req.claims.userId, "template.rollback", `${t.slug}@v${version}`, "success");
+  return ok(res, { rolledBack: Number(version) });
+});
+
+// DELETE /api/admin/templates?id= — ADMIN
+app.delete("/api/admin/templates", requireAdmin, async (req, res) => {
+  const { id } = req.query;
+  if (!id) return fail(res, "VALIDATION", "id required", 400);
+  if (prisma) {
+    try {
+      const row = await prisma.template.findUnique({ where: { id: String(id) } });
+      await prisma.template.delete({ where: { id: String(id) } });
+      await audit(req.claims.userId, "template.delete", row ? row.slug : String(id), "success");
+      return ok(res, null);
+    } catch { /* fallthrough */ }
+  }
+  const t = templatesMem.find((x) => x.id === String(id));
+  templatesMem = templatesMem.filter((x) => x.id !== String(id));
+  persist();
+  await audit(req.claims.userId, "template.delete", t ? t.slug : String(id), "success");
+  return ok(res, null);
+});
+
+// GET /api/templates/:slug — 공개 렌더용 (게시된 것만)
+app.get("/api/templates/:slug", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const find = async () => {
+    if (prisma) {
+      try {
+        const row = await prisma.template.findUnique({ where: { slug: req.params.slug } });
+        if (row && row.status === "published") return { ...row, ...(JSON.parse(row.body || '{"pages":[]}')) };
+      } catch { /* fallthrough */ }
+    }
+    return templatesMem.find((x) => x.slug === req.params.slug && x.status === "published");
+  };
+  const t = await find();
+  if (!t) return fail(res, "NOT_FOUND", "게시된 템플릿 없음", 404);
+  return ok(res, t);
+});
+
+// ----- 텔레메트리 (현황 대시보드용) -----
+// eventsMem: {id, deviceUuid, appSlug, type: APP_START|APP_COMPLETE|ERROR, at}
+// POST /api/device/events {uuid, events: [{appSlug, type, at?}]} (최대 50건)
+app.post("/api/device/events", async (req, res) => {
+  const parsed = z.object({
+    uuid: z.string().min(1).max(100),
+    events: z.array(z.object({
+      appSlug: z.string().max(100),
+      type: z.enum(["APP_START", "APP_COMPLETE", "ERROR"]),
+      at: z.string().max(30).optional()
+    })).max(50)
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const rows = parsed.data.events.map((e) => ({
+    id: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    deviceUuid: parsed.data.uuid, appSlug: e.appSlug, type: e.type,
+    at: e.at || new Date().toISOString()
+  }));
+  if (prisma) {
+    try {
+      await prisma.appEvent.createMany({ data: rows });
+      return ok(res, { received: rows.length });
+    } catch { /* fallthrough */ }
+  }
+  eventsMem.push(...rows);
+  eventsMem = eventsMem.slice(-5000);
+  return ok(res, { received: rows.length });
+});
+
+// GET /api/admin/stats?days=7 — ADMIN (일별 이용·완료, 앱별 완료율, 기기별)
+app.get("/api/admin/stats", requireAdmin, async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days || 7), 1), 90);
+  const since = new Date(Date.now() - days * 86400000);
+  let events = [];
+  if (prisma) {
+    try {
+      events = await prisma.appEvent.findMany({ where: { at: { gte: since } }, orderBy: { at: "asc" }, take: 5000 });
+    } catch { events = eventsMem.filter((e) => new Date(e.at) >= since); }
+  } else {
+    events = eventsMem.filter((e) => new Date(e.at) >= since);
+  }
+  const dayKey = (iso) => new Date(iso).toISOString().slice(0, 10);
+  const perDayMap = new Map();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(Date.now() - (days - 1 - i) * 86400000).toISOString().slice(0, 10);
+    perDayMap.set(d, { date: d, starts: 0, completes: 0 });
+  }
+  const perAppMap = new Map();
+  const perDeviceMap = new Map();
+  let errors = 0;
+  for (const e of events) {
+    const dk = dayKey(e.at);
+    if (perDayMap.has(dk)) {
+      if (e.type === "APP_START") perDayMap.get(dk).starts++;
+      if (e.type === "APP_COMPLETE") perDayMap.get(dk).completes++;
+    }
+    if (!perAppMap.has(e.appSlug)) perAppMap.set(e.appSlug, { slug: e.appSlug, starts: 0, completes: 0 });
+    if (e.type === "APP_START") perAppMap.get(e.appSlug).starts++;
+    if (e.type === "APP_COMPLETE") perAppMap.get(e.appSlug).completes++;
+    if (!perDeviceMap.has(e.deviceUuid)) perDeviceMap.set(e.deviceUuid, { uuid: e.deviceUuid, starts: 0, completes: 0 });
+    if (e.type === "APP_START") perDeviceMap.get(e.deviceUuid).starts++;
+    if (e.type === "APP_COMPLETE") perDeviceMap.get(e.deviceUuid).completes++;
+    if (e.type === "ERROR") errors++;
+  }
+  const perApp = [...perAppMap.values()].map((a) => ({ ...a, rate: a.starts ? Math.round((a.completes / a.starts) * 100) : 0 }));
+  return ok(res, { perDay: [...perDayMap.values()], perApp, perDevice: [...perDeviceMap.values()], errors });
 });
 
 // ----- Admin: users -----

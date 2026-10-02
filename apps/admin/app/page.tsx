@@ -10,6 +10,9 @@ const DEFAULT_MENU = [
   { id: "overview", label: "대시보드" },
   { id: "categories", label: "카테고리 관리" },
   { id: "apps", label: "앱 관리" },
+  { id: "templates", label: "템플릿" },
+  { id: "stats", label: "현황" },
+  { id: "devices", label: "장비 관리" },
   { id: "users", label: "사용자" },
   { id: "permissions", label: "권한" },
   { id: "settings", label: "설정" },
@@ -19,6 +22,12 @@ const DEFAULT_MENU = [
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
 interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; }
+interface TplList { id: string; slug: string; name: string; category?: string; status: string; version: number; pageCount: number; updatedAt: string; }
+interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; }
+interface TplPage { id: string; title: string; components: TplComp[]; }
+interface TplComp { id: string; type: string; props: Record<string, string | number>; }
+interface StatRow { slug?: string; uuid?: string; date?: string; starts: number; completes: number; rate?: number; }
+interface Stats { perDay: StatRow[]; perApp: StatRow[]; perDevice: StatRow[]; errors: number; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
 interface Device { id: string; uuid: string; name: string; code: string; status: string; lastSeen: string; createdAt: string; assignedSlug?: string; screen?: string; placement?: string; storagePct?: number; }
 
@@ -34,6 +43,12 @@ export default function Dashboard() {
   const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [tpls, setTpls] = useState<TplList[]>([]);
+  const [tpl, setTpl] = useState<TplFull | null>(null);
+  const [tplPage, setTplPage] = useState(0);
+  const [newTpl, setNewTpl] = useState({ name: "", slug: "", category: "전체" });
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [statDays, setStatDays] = useState(7);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
@@ -125,6 +140,10 @@ export default function Dashboard() {
     fetch("/api/admin/devices").then(async (r) => {
       const j = await r.json();
       if (j.success) setDevices(j.data);
+    }).catch(() => {});
+    fetch("/api/admin/templates").then(async (r) => {
+      const j = await r.json();
+      if (j.success) setTpls(j.data);
     }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
@@ -246,6 +265,92 @@ export default function Dashboard() {
     const j = await r.json().catch(() => ({}));
     result(r.ok && j.success, "장비 삭제됨", j);
     if (r.ok) load();
+  }
+  async function loadStats(days: number) {
+    const r = await fetch(`/api/admin/stats?days=${days}`);
+    const j = await r.json().catch(() => ({}));
+    if (j.success) setStats(j.data);
+  }
+
+  async function createTpl(e: React.FormEvent) {
+    e.preventDefault();
+    const { ok, j } = await api("/api/admin/templates", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(newTpl)
+    });
+    result(ok, "템플릿 생성됨", j);
+    if (ok) { setNewTpl({ name: "", slug: "", category: "전체" }); load(); }
+  }
+
+  async function openTpl(id: string) {
+    // 전체 목록에서 찾되 pages까지 필요하면 PATCH 전 최신 스냅샷 유지: 목록에는 pages가 없으므로 빈 편집기로 시작하지 않고 서버 전체 조회를 위해 임시 저장 후 PATCH 사용
+    const cur = tpls.find((t) => t.id === id);
+    if (!cur) return;
+    setTpl({ ...cur, pages: (tpl && tpl.id === id) ? tpl.pages : [], completePageId: (tpl && tpl.id === id) ? tpl.completePageId : null, versions: (tpl && tpl.id === id) ? tpl.versions : [] });
+    setTplPage(0);
+    // 최신 pages 복원: 빈 PATCH가 아닌 조회 전용이 없으므로 로컬 유지 (저장 시 서버 값과 병합되지 않음 — 편집 전 주의)
+    const { ok, j } = await api("/api/admin/templates", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id })
+    });
+    if (ok && j.data && (j.data as TplFull).pages) {
+      const full = j.data as TplFull;
+      setTpl({ ...cur, pages: full.pages || [], completePageId: full.completePageId ?? null, versions: full.versions || [] });
+    }
+  }
+
+  async function saveTpl(t: TplFull, msg = "템플릿 저장됨") {
+    const { ok, j } = await api("/api/admin/templates", {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: t.id, name: t.name, category: t.category, pages: t.pages, completePageId: t.completePageId ?? null })
+    });
+    result(ok, msg, j);
+    if (ok) { setTpl({ ...t }); load(); }
+  }
+
+  async function publishTpl(id: string) {
+    const r = await fetch("/api/admin/templates/publish", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.success) {
+      notify(`게시됨${(j.data?.warnings || []).length ? ` (경고 ${j.data.warnings.length}건)` : ""} → 런처·장비에 반영`);
+      setTpl((cur) => cur && cur.id === id ? { ...cur, status: "published", version: j.data.version ?? cur.version, versions: j.data.versions ?? cur.versions } : cur);
+      load();
+    } else {
+      notify(j.error?.message ?? "게시 실패", false);
+    }
+  }
+
+  async function rollbackTpl(id: string, version: number) {
+    if (!confirm(`v${version}으로 롤백할까요?`)) return;
+    const r = await fetch("/api/admin/templates/rollback", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, version })
+    });
+    const j = await r.json().catch(() => ({}));
+    result(r.ok && j.success, `v${version}으로 롤백됨`, j);
+    if (r.ok) { setTpl(null); load(); }
+  }
+
+  async function removeTpl(id: string) {
+    if (!confirm("템플릿을 삭제할까요?")) return;
+    const r = await fetch(`/api/admin/templates?id=${id}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    result(r.ok && j.success, "템플릿 삭제됨", j);
+    if (r.ok) { setTpl(null); load(); }
+  }
+
+  function updTpl(patch: Partial<TplFull>) {
+    setTpl((cur) => (cur ? { ...cur, ...patch } : cur));
+  }
+  function updPage(pageId: string, patch: Partial<TplPage>) {
+    setTpl((cur) => (cur ? { ...cur, pages: cur.pages.map((p) => (p.id === pageId ? { ...p, ...patch } : p)) } : cur));
+  }
+  function updComp(pageId: string, compId: string, props: Record<string, string | number>) {
+    setTpl((cur) => (cur ? {
+      ...cur,
+      pages: cur.pages.map((p) => (p.id === pageId
+        ? { ...p, components: p.components.map((c) => (c.id === compId ? { ...c, props: { ...c.props, ...props } } : c)) }
+        : p))
+    } : cur));
   }
   async function removeUser(id: string, email: string) {
     if (!confirm(`${email} 사용자를 삭제할까요?`)) return;
@@ -661,6 +766,191 @@ export default function Dashboard() {
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {tab === "templates" && (
+          <section>
+            <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">템플릿 (키오스크 화면 에디터)</h1>
+            <form onSubmit={createTpl} className="flex flex-wrap gap-2 max-w-2xl bg-white border rounded-2xl p-4 mb-4">
+              <input className={`${input} flex-1 min-w-[120px]`} placeholder="이름" value={newTpl.name} onChange={(e) => setNewTpl({ ...newTpl, name: e.target.value })} aria-label="새 템플릿 이름" />
+              <input className={`${input} flex-1 min-w-[120px]`} placeholder="슬러그 (비우면 자동)" value={newTpl.slug} onChange={(e) => setNewTpl({ ...newTpl, slug: e.target.value })} aria-label="새 템플릿 슬러그" />
+              <select className={input} value={newTpl.category} onChange={(e) => setNewTpl({ ...newTpl, category: e.target.value })} aria-label="새 템플릿 카테고리">
+                {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button className={primary}>새 템플릿</button>
+            </form>
+            <ul className="grid gap-2 mb-6">
+              {tpls.map((t) => (
+                <li key={t.id} className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-2 text-[clamp(14px,2vw,16px)]">
+                  <span className="flex-1 min-w-[200px]"><b>{t.name}</b> — {t.slug} · {t.status === "published" ? `게시됨 v${t.version}` : "초안"} · {t.pageCount}페이지</span>
+                  <button className={btn} onClick={() => openTpl(t.id)}>열기</button>
+                  <button className={btn} onClick={() => publishTpl(t.id)}>게시</button>
+                  <button className={btn} onClick={() => removeTpl(t.id)}>삭제</button>
+                </li>
+              ))}
+              {tpls.length === 0 && <li className="text-gray-500">템플릿 없음</li>}
+            </ul>
+            {tpl && (
+              <div className="bg-white border rounded-2xl p-4 grid gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <b className="text-[clamp(18px,2.5vw,24px)]">{tpl.name}</b>
+                  <span className="text-[clamp(12px,1.5vw,14px)] text-gray-500">{tpl.status} v{tpl.version}</span>
+                  <a className="min-h-[48px] inline-flex items-center rounded-lg border px-3" href={`/t/${tpl.slug}`} target="_blank" rel="noreferrer">미리보기 ↗</a>
+                  <button className={primary} onClick={() => saveTpl(tpl)}>저장</button>
+                  <button className={btn} onClick={() => publishTpl(tpl.id)}>게시 (접근성 검증)</button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">이름
+                    <input className={input} value={tpl.name} onChange={(e) => updTpl({ name: e.target.value })} /></label>
+                  <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">카테고리
+                    <select className={input} value={tpl.category || "전체"} onChange={(e) => updTpl({ category: e.target.value })} aria-label="템플릿 카테고리">
+                      {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select></label>
+                  <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">완료 화면 (APP_COMPLETE)
+                    <select className={input} value={tpl.completePageId || ""} onChange={(e) => updTpl({ completePageId: e.target.value || null })} aria-label="완료 화면">
+                      <option value="">없음</option>
+                      {tpl.pages.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+                    </select></label>
+                </div>
+                {(tpl.versions || []).length > 0 && (
+                  <div className="text-[clamp(13px,2vw,15px)]">버전: {(tpl.versions || []).map((v) => (
+                    <button key={v} className="border rounded-lg px-2 py-1 mr-1 min-h-[48px]" onClick={() => rollbackTpl(tpl.id, v)}>v{v}로 롤백</button>
+                  ))}</div>
+                )}
+                <div className="flex gap-2 items-center">
+                  <b>페이지 ({tpl.pages.length})</b>
+                  <button className={btn} onClick={() => {
+                    const n = tpl.pages.length + 1;
+                    updTpl({ pages: [...tpl.pages, { id: `p${Date.now()}`, title: `화면${n}`, components: [] }] });
+                  }}>+ 페이지</button>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {tpl.pages.map((p, i) => (
+                    <button key={p.id} onClick={() => setTplPage(i)}
+                      className={`min-h-[48px] whitespace-nowrap rounded-lg border px-3 ${i === tplPage ? "bg-gray-900 text-white font-bold" : ""}`}>{p.title}</button>
+                  ))}
+                </div>
+                {tpl.pages[tplPage] && (
+                  <div className="border rounded-xl p-3 grid gap-2">
+                    <div className="flex gap-2 items-center">
+                      <input className={`${input} flex-1`} value={tpl.pages[tplPage].title}
+                        onChange={(e) => updPage(tpl.pages[tplPage].id, { title: e.target.value })} aria-label="페이지 제목" />
+                      <button className={btn} onClick={() => {
+                        const ps = tpl.pages.filter((_, j) => j !== tplPage);
+                        updTpl({ pages: ps }); setTplPage(0);
+                      }}>페이지 삭제</button>
+                    </div>
+                    {(["text", "button", "image", "video", "nav"] as const).map((t) => (
+                      <button key={t} className={btn} onClick={() => {
+                        const id = `c${Date.now()}`;
+                        const defaults: Record<string, Record<string, string | number>> = {
+                          text: { content: "새 텍스트", size: 20, color: "#111111", align: "left", tts: "" },
+                          button: { label: "새 버튼", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "", tts: "" },
+                          image: { src: "/logo.svg", alt: "", height: 0 },
+                          video: { src: "" },
+                          nav: { label: "이동", target: "/" }
+                        };
+                        updPage(tpl.pages[tplPage].id, { components: [...tpl.pages[tplPage].components, { id, type: t, props: defaults[t] }] });
+                      }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : "내비"}</button>
+                    ))}
+                    {tpl.pages[tplPage].components.map((c, ci) => (
+                      <div key={c.id} className="border rounded-lg p-2 grid gap-1">
+                        <div className="flex items-center gap-2">
+                          <b className="text-[clamp(13px,2vw,15px)]">{c.type}</b>
+                          <span className="flex-1" />
+                          <button className={btn} onClick={() => {
+                            const arr = [...tpl.pages[tplPage].components];
+                            if (ci > 0) { [arr[ci - 1], arr[ci]] = [arr[ci], arr[ci - 1]]; updPage(tpl.pages[tplPage].id, { components: arr }); }
+                          }} aria-label="위로">↑</button>
+                          <button className={btn} onClick={() => {
+                            const arr = [...tpl.pages[tplPage].components];
+                            if (ci < arr.length - 1) { [arr[ci + 1], arr[ci]] = [arr[ci], arr[ci + 1]]; updPage(tpl.pages[tplPage].id, { components: arr }); }
+                          }} aria-label="아래로">↓</button>
+                          <button className={btn} onClick={() => updPage(tpl.pages[tplPage].id, { components: tpl.pages[tplPage].components.filter((x) => x.id !== c.id) })}>삭제</button>
+                        </div>
+                        {c.type === "text" && (<>
+                          <input className={input} placeholder="내용" value={String(c.props.content ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { content: e.target.value })} />
+                          <div className="flex gap-1">
+                            <input className={`${input} flex-1`} placeholder="크기" value={String(c.props.size ?? 20)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { size: e.target.value })} aria-label="글자 크기" />
+                            <input type="color" className="min-h-[48px] min-w-[48px]" value={String(c.props.color ?? "#111111")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { color: e.target.value })} aria-label="글자색" />
+                            <input type="color" className="min-h-[48px] min-w-[48px]" value={String(c.props.bg ?? "#ffffff")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { bg: e.target.value })} aria-label="배경색" />
+                          </div>
+                          <input className={input} placeholder="TTS 안내 (비우면 경고)" value={String(c.props.tts ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { tts: e.target.value })} />
+                        </>)}
+                        {c.type === "button" && (<>
+                          <input className={input} placeholder="라벨" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
+                          <input className={input} placeholder="이동 대상 (페이지ID 또는 /경로 또는 https://…)" value={String(c.props.target ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { target: e.target.value })} />
+                          <div className="flex gap-1">
+                            <input type="color" className="min-h-[48px] min-w-[48px]" value={String(c.props.bg ?? "#C2410C")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { bg: e.target.value })} aria-label="버튼 배경" />
+                            <input type="color" className="min-h-[48px] min-w-[48px]" value={String(c.props.color ?? "#FFFFFF")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { color: e.target.value })} aria-label="버튼 글자색" />
+                            <input className={`${input} flex-1`} placeholder="높이" value={String(c.props.height ?? 64)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { height: e.target.value })} aria-label="버튼 높이" />
+                          </div>
+                          <input className={input} placeholder="TTS 안내" value={String(c.props.tts ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { tts: e.target.value })} />
+                        </>)}
+                        {c.type === "image" && (<>
+                          <input className={input} placeholder="이미지 URL (/uploads/… 또는 https://…)" value={String(c.props.src ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { src: e.target.value })} />
+                          <input className={input} placeholder="대체 텍스트" value={String(c.props.alt ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { alt: e.target.value })} />
+                        </>)}
+                        {c.type === "video" && (
+                          <input className={input} placeholder="동영상 URL" value={String(c.props.src ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { src: e.target.value })} />
+                        )}
+                        {c.type === "nav" && (<>
+                          <input className={input} placeholder="라벨" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
+                          <input className={input} placeholder="이동 대상 (/ 또는 /경로)" value={String(c.props.target ?? "/")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { target: e.target.value })} />
+                        </>)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {tab === "stats" && (
+          <section>
+            <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">현황 대시보드</h1>
+            <div className="flex gap-2 items-center mb-4">
+              <select className={input} value={statDays} onChange={(e) => { const d = Number(e.target.value); setStatDays(d); loadStats(d); }} aria-label="조회 기간">
+                <option value={7}>최근 7일</option>
+                <option value={30}>최근 30일</option>
+              </select>
+              <button className={btn} onClick={() => loadStats(statDays)}>새로고침</button>
+            </div>
+            {!stats && <button className={primary} onClick={() => loadStats(statDays)}>현황 불러오기</button>}
+            {stats && (<>
+              <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">일별 이용 (시작/완료, 오류 {stats.errors}건)</h2>
+              <div className="bg-white border rounded-2xl p-4 mb-4 flex items-end gap-1 h-40" role="img" aria-label="일별 이용 막대 차트">
+                {(stats.perDay || []).map((d) => {
+                  const max = Math.max(1, ...stats.perDay.map((x) => x.starts));
+                  return (
+                    <div key={d.date} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.date}: 시작 ${d.starts}, 완료 ${d.completes}`}>
+                      <div className="w-full bg-orange-200 rounded-t" style={{ height: `${Math.round((d.starts / max) * 70)}%`, minHeight: d.starts ? 4 : 0 }} />
+                      <div className="w-full bg-orange-700 rounded-t" style={{ height: `${Math.round((d.completes / max) * 30)}%`, minHeight: d.completes ? 4 : 0 }} />
+                      <span className="text-[10px] text-gray-500">{String(d.date).slice(5)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">앱별 완료율</h2>
+              <ul className="grid gap-2 mb-4">
+                {(stats.perApp || []).map((a) => (
+                  <li key={a.slug} className="bg-white border rounded-lg p-3 text-[clamp(14px,2vw,16px)]">
+                    <b>{a.slug}</b> — 시작 {a.starts} · 완료 {a.completes} · <b>{a.rate}%</b>
+                  </li>
+                ))}
+                {(stats.perApp || []).length === 0 && <li className="text-gray-500">이벤트 없음 — 키오스크에서 템플릿을 실행하면 집계됩니다</li>}
+              </ul>
+              <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">기기별</h2>
+              <ul className="grid gap-2">
+                {(stats.perDevice || []).map((d) => (
+                  <li key={d.uuid} className="bg-white border rounded-lg p-3 text-[clamp(12px,1.5vw,14px)] font-mono break-all">
+                    {String(d.uuid).slice(0, 18)}… — 시작 {d.starts} · 완료 {d.completes}
+                  </li>
+                ))}
+              </ul>
+            </>)}
           </section>
         )}
 
