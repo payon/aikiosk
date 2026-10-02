@@ -246,6 +246,8 @@ export default function Dashboard() {
   }
 
   const cats = Array.from(new Set(apps.map((a) => a.category || "전체")));
+  // 메뉴 우선: 선택 후보 = 전체 + 메뉴순서 + 사용 중 (중복 제거)
+  const catOptions = ["전체", ...Array.from(new Set([...settings.menuOrder, ...cats])).filter((c) => c !== "전체")];
   const input = "min-h-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const btn = "min-h-[48px] min-w-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const primary = "min-h-[48px] rounded-lg bg-gray-900 text-white px-4 text-[clamp(16px,2vw,24px)]";
@@ -341,10 +343,11 @@ export default function Dashboard() {
               {(["name", "slug", "targetUrl", "iconUrl", "description"] as const).map((k) => (
                 <input key={k} className={input} placeholder={k} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
               ))}
-              <input className={input} placeholder="category (목록에서 선택 또는 직접 입력)" list="cat-list-new" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
-              <datalist id="cat-list-new">
-                {cats.map((c) => <option key={c} value={c} />)}
-              </datalist>
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">소속 카테고리 (메뉴에 먼저 생성)
+                <select className={input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} aria-label="소속 카테고리">
+                  {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
               <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">아이콘 업로드 (png/jpg/webp/svg, 1.5MB 이하)
                 <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
                   disabled={uploading}
@@ -386,10 +389,11 @@ export default function Dashboard() {
                   {(["name", "slug", "targetUrl", "iconUrl", "description"] as const).map((k) => (
                     <input key={k} className={input} placeholder={k} value={editing[k] ?? ""} onChange={(e) => setEditing({ ...editing, [k]: e.target.value })} />
                   ))}
-                  <input className={input} placeholder="category (목록에서 선택 또는 직접 입력)" list="cat-list" value={editing.category || "전체"} onChange={(e) => setEditing({ ...editing, category: e.target.value })} />
-                  <datalist id="cat-list">
-                    {cats.map((c) => <option key={c} value={c} />)}
-                  </datalist>
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">소속 카테고리 (메뉴에 먼저 생성)
+                    <select className={input} value={editing.category || "전체"} onChange={(e) => setEditing({ ...editing, category: e.target.value })} aria-label="소속 카테고리">
+                      {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </label>
                   <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">아이콘 업로드
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
                       disabled={uploading}
@@ -449,11 +453,25 @@ export default function Dashboard() {
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">메뉴 순서·삭제</h2>
             <ul className="grid gap-2 mb-6">
               {cats.map((c) => (
-                <li key={c} className="bg-white border rounded-lg p-3 flex items-center gap-2 text-[clamp(14px,2vw,16px)]">
-                  <span className="flex-1"><b>{c}</b> — {apps.filter((a) => (a.category || "전체") === c).length}개 앱</span>
-                  <button className={btn} onClick={() => menuMove(c, -1)} aria-label={`${c} 위로`}>↑</button>
-                  <button className={btn} onClick={() => menuMove(c, 1)} aria-label={`${c} 아래로`}>↓</button>
-                  <button className={btn} onClick={() => deleteCat(c)}>삭제</button>
+                <li key={c} className="bg-white border rounded-lg p-3 text-[clamp(14px,2vw,16px)]">
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1"><b>{c}</b> — {apps.filter((a) => (a.category || "전체") === c).length}개 앱</span>
+                    <button className={btn} onClick={() => menuMove(c, -1)} aria-label={`${c} 위로`}>↑</button>
+                    <button className={btn} onClick={() => menuMove(c, 1)} aria-label={`${c} 아래로`}>↓</button>
+                    <button className={btn} onClick={() => deleteCat(c)}>삭제</button>
+                  </div>
+                  <ul className="mt-2 grid gap-1">
+                    {apps.filter((a) => (a.category || "전체") === c).map((a) => (
+                      <li key={a.id} className="flex items-center gap-2 text-[clamp(12px,1.5vw,14px)]">
+                        <span className="flex-1">{a.name} ({a.slug})</span>
+                        <select className="min-h-[48px] border rounded-lg px-2" value={a.category || "전체"}
+                          onChange={(e) => patch(a.id, { category: e.target.value })}
+                          aria-label={`${a.name} 소속 카테고리`}>
+                          {catOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>

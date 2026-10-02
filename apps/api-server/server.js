@@ -318,6 +318,14 @@ app.get("/health", (req, res) => ok(res, { db: !!prisma, domain: DOMAIN, localAp
 
 app.get("/api/platform", async (req, res) => ok(res, publicSettings(await getSettings())));
 
+async function validCategories() {
+  // 메뉴 우선 모델: "전체" + 메뉴순서 + 사용 중인 카테고리만 유효한 소속
+  const rows = await getAllApps();
+  const s = await getSettings();
+  const set = new Set(["전체", ...((s.menuOrder || [])), ...rows.map((a) => a.category || "전체")]);
+  return [...set];
+}
+
 function orderCats(rows, menuOrder) {
   const map = new Map();
   for (const a of rows) {
@@ -431,6 +439,10 @@ app.post("/api/admin/apps", requireAdmin, async (req, res) => {
   if (!checkLimit(`admin:${ip}`, 100, 60000)) return fail(res, "RATE_LIMIT", "Too many requests", 429);
   const parsed = AppCreateSchema.safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  const validNew = await validCategories();
+  if (parsed.data.category && !validNew.includes(parsed.data.category)) {
+    return fail(res, "VALIDATION", `카테고리는 다음 중 선택: ${validNew.join(", ")} (카테고리 메뉴에서 먼저 생성)`, 400);
+  }
   const v = await validateTarget(parsed.data.targetUrl);
   if (v === "SSRF") {
     await audit(req.claims.userId, "app.register", parsed.data.slug, "fail");
@@ -453,6 +465,12 @@ app.patch("/api/admin/apps", requireAdmin, async (req, res) => {
   const parsed = AppPatchSchema.safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
   const { id, ...data } = parsed.data;
+  if (data.category) {
+    const validUpd = await validCategories();
+    if (!validUpd.includes(data.category)) {
+      return fail(res, "VALIDATION", `카테고리는 다음 중 선택: ${validUpd.join(", ")} (카테고리 메뉴에서 먼저 생성)`, 400);
+    }
+  }
   if (data.targetUrl) {
     const v = await validateTarget(data.targetUrl);
     if (v === "SSRF") {
