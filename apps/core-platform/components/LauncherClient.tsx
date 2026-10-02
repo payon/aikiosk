@@ -19,31 +19,36 @@ export function LauncherClient({ initialApps, initialCats, announcement, grid }:
   const [cat, setCat] = useState("전체");
   const [q, setQ] = useState("");
 
-  // 어드민 변경 실시간 반영 (30초 폴링, 화면 가림 시 중단)
-  // 브랜드·공지는 즉시 갱신, 배경·그리드 변경은 서버컴포넌트 새로고침으로 즉시 적용
+  // 어드민 변경 즉시 반영: 플랫폼 설정 3초, 앱/카테고리 10초 폴링 (화면 가림 시 중단)
   useEffect(() => {
-    const t = setInterval(async () => {
-      if (document.hidden) return;
+    let alive = true;
+    const pollPlatform = async () => {
       try {
-        const [a, c, p] = await Promise.all([
+        const p = await fetch("/api/platform").then((r) => r.json());
+        if (!alive || !p.success) return;
+        if (typeof p.data?.announcement === "string" && p.data.announcement !== announcementLive) {
+          setAnnouncement(p.data.announcement);
+        }
+        const sig = JSON.stringify([p.data?.platformName, p.data?.backgroundType, p.data?.backgroundColor, p.data?.backgroundImage, p.data?.gridDensity, p.data?.gridCols, p.data?.showAppName, p.data?.idleTimeoutMin, p.data?.logoUrl]);
+        const prev = (window as unknown as { __platSig?: string }).__platSig;
+        if (prev && prev !== sig) router.refresh();
+        (window as unknown as { __platSig?: string }).__platSig = sig;
+      } catch { /* ignore */ }
+    };
+    const pollApps = async () => {
+      try {
+        const [a, c] = await Promise.all([
           fetch("/api/apps").then((r) => r.json()),
-          fetch("/api/categories").then((r) => r.json()),
-          fetch("/api/platform").then((r) => r.json())
+          fetch("/api/categories").then((r) => r.json())
         ]);
+        if (!alive) return;
         if (a.success) setApps(a.data);
         if (c.success) setCats(c.data);
-        if (p.success) {
-          if (typeof p.data?.announcement === "string" && p.data.announcement !== announcementLive) {
-            setAnnouncement(p.data.announcement);
-          }
-          const sig = JSON.stringify([p.data?.platformName, p.data?.backgroundType, p.data?.backgroundColor, p.data?.backgroundImage, p.data?.gridDensity, p.data?.gridCols, p.data?.showAppName, p.data?.idleTimeoutMin, p.data?.logoUrl]);
-          const prev = (window as unknown as { __platSig?: string }).__platSig;
-          if (prev && prev !== sig) router.refresh();
-          (window as unknown as { __platSig?: string }).__platSig = sig;
-        }
       } catch { /* ignore */ }
-    }, 15000);
-    return () => clearInterval(t);
+    };
+    const t1 = setInterval(() => { if (!document.hidden) pollPlatform(); }, 3000);
+    const t2 = setInterval(() => { if (!document.hidden) pollApps(); }, 10000);
+    return () => { alive = false; clearInterval(t1); clearInterval(t2); };
   }, [router, announcementLive]);
 
   const filtered = useMemo(() => {
