@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppGrid } from "@/components/AppGrid";
 import type { AppRegistry } from "@/types/app";
 
@@ -12,17 +12,35 @@ interface Props {
 
 export function LauncherClient({ initialApps, initialCats, announcement }: Props) {
   const router = useRouter();
+  const [apps, setApps] = useState(initialApps);
+  const [cats, setCats] = useState(initialCats);
   const [cat, setCat] = useState("전체");
   const [q, setQ] = useState("");
 
+  // 어드민 변경 실시간 반영 (30초 폴링, 화면 가림 시 중단)
+  useEffect(() => {
+    const t = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const [a, c] = await Promise.all([
+          fetch("/api/apps").then((r) => r.json()),
+          fetch("/api/categories").then((r) => r.json())
+        ]);
+        if (a.success) setApps(a.data);
+        if (c.success) setCats(c.data);
+      } catch { /* ignore */ }
+    }, 30000);
+    return () => clearInterval(t);
+  }, []);
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return initialApps.filter((a) => {
+    return apps.filter((a) => {
       if (cat !== "전체" && (a.category || "전체") !== cat) return false;
       if (s && !(a.name + a.slug + (a.description ?? "")).toLowerCase().includes(s)) return false;
       return true;
     });
-  }, [initialApps, q, cat]);
+  }, [apps, q, cat]);
 
   return (
     <>
@@ -32,7 +50,7 @@ export function LauncherClient({ initialApps, initialCats, announcement }: Props
         </p>
       )}
       <nav className="flex gap-2 overflow-x-auto pb-2 mb-3" aria-label="카테고리 메뉴">
-        {["전체", ...initialCats.map((c) => c.name)].map((c) => (
+        {["전체", ...cats.map((c) => c.name)].map((c) => (
           <button
             key={c}
             onClick={() => setCat(c)}

@@ -7,7 +7,8 @@ const BACKEND = process.env.API_INTERNAL_URL || "http://127.0.0.1:4501";
 
 async function get<T>(path: string, fallback: T): Promise<T> {
   try {
-    const r = await fetch(`${BACKEND}${path}`, { next: { revalidate: 30 } });
+    // 항상 최신 (어드민 변경 즉시 반영, 캐시 없음)
+    const r = await fetch(`${BACKEND}${path}`, { cache: "no-store" });
     if (!r.ok) throw new Error("bad");
     const j = await r.json();
     return (j.success ? j.data : fallback) as T;

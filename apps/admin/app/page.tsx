@@ -257,6 +257,9 @@ export default function Dashboard() {
   const cats = Array.from(new Set(apps.map((a) => a.category || "전체")));
   // 메뉴 우선: 선택 후보 = 전체 + 메뉴순서 + 사용 중 (중복 제거)
   const catOptions = ["전체", ...Array.from(new Set([...settings.menuOrder, ...cats])).filter((c) => c !== "전체")];
+  // 표시용 메뉴: 메뉴순서 우선, 그 외 사용 중 카테고리 뒤에 (빈 카테고리도 표시)
+  const menuCats = [...settings.menuOrder.filter((c) => c !== "전체"), ...cats.filter((c) => c !== "전체" && !settings.menuOrder.includes(c))];
+  const showCats = ["전체", ...menuCats];
   const input = "min-h-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const btn = "min-h-[48px] min-w-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const primary = "min-h-[48px] rounded-lg bg-gray-900 text-white px-4 text-[clamp(16px,2vw,24px)]";
@@ -462,7 +465,7 @@ export default function Dashboard() {
             </form>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">메뉴 순서·삭제</h2>
             <ul className="grid gap-2 mb-6">
-              {cats.map((c) => (
+              {menuCats.map((c) => (
                 <li key={c} className="bg-white border rounded-lg p-3 text-[clamp(14px,2vw,16px)]">
                   <div className="flex items-center gap-2">
                     <span className="flex-1"><b>{c}</b> — {apps.filter((a) => (a.category || "전체") === c).length}개 앱</span>
