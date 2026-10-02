@@ -10,10 +10,16 @@ export interface AppGridProps {
 
 function AppCard({ app, onClick }: { app: AppRegistry; onClick: () => void }) {
   const [imgOk, setImgOk] = useState(true);
+  // 앱별 배경: 이미지(cover, 해상도 자동대응) 또는 단색. 가독성 오버레이 포함.
+  const cardStyle: React.CSSProperties =
+    app.bgType === "image" && app.bgImage
+      ? { backgroundImage: `linear-gradient(rgba(255,255,255,.82), rgba(255,255,255,.82)), url(${app.bgImage})`, backgroundSize: "cover", backgroundPosition: "center" }
+      : { backgroundColor: app.bgColor || "#FFFFFF" };
   return (
     <motion.button
       whileHover={{ scale: 1.05 }}
       onClick={onClick}
+      style={cardStyle}
       className="aspect-[4/5] min-h-[48px] min-w-[48px] rounded-2xl bg-white p-4 shadow hover:shadow-lg flex flex-col items-center justify-center gap-2"
       aria-label={app.name}
     >

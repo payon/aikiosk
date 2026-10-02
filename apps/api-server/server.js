@@ -80,10 +80,31 @@ async function resolvesToSelf(hostname) {
 }
 // 등록 검증: Allowlist 통과 여부만 본다.
 // 같은 IP의 서브도메인은 vhost로 다른 앱일 수 있으므로 DNS 차단하지 않는다.
-// (exact-origin 루프는 미들웨어 508 가드가 담당)
+// 허용 목록 = PLATFORM_DOMAIN + 설정의 allowedDomains (어드민에서 관리)
+async function allowedList() {
+  const base = [DOMAIN];
+  try {
+    const s = await getSettings();
+    for (const d of s.allowedDomains || []) {
+      const t = String(d).trim();
+      if (t && !base.includes(t)) base.push(t);
+    }
+  } catch { /* ignore */ }
+  return base;
+}
 async function validateTarget(targetUrl) {
-  if (!isAllowedTarget(targetUrl)) return "SSRF";
-  return null;
+  const list = await allowedList();
+  let u;
+  try {
+    u = new URL(targetUrl);
+  } catch {
+    return "SSRF";
+  }
+  if (BLOCKED.includes(u.hostname)) return "SSRF";
+  if (isLocalHost(u.hostname)) return ALLOW_LOCAL ? null : "SSRF";
+  if (u.protocol !== "https:") return "SSRF";
+  const ok = list.some((d) => u.hostname === d || u.hostname.endsWith("." + d));
+  return ok ? null : "SSRF";
 }
 function isAllowedTarget(targetUrl) {
   let u;
@@ -102,6 +123,13 @@ function seedTarget(slug) {
   if (LOCAL_APPS) return `http://127.0.0.1:${slug === "library" ? 4511 : slug === "aiplatform" ? 4512 : 4513}`;
   return `https://${slug}.${DOMAIN}`;
 }
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+const DATA_DIR = path.join(__dirname, "data");
+const DATA_FILE = path.join(DATA_DIR, "store.json");
+const fs = require("fs");
+try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch { /* ignore */ }
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
+
 let store = [
   { id: "seed-1", name: "러스트 라이브러리", slug: "library", targetUrl: seedTarget("library"), iconUrl: "/icons/library.svg", description: "도서·디지털 에셋 탐색", displayOrder: 0, isActive: true, category: "라이브러리" },
   { id: "seed-2", name: "AI Platform", slug: "aiplatform", targetUrl: seedTarget("aiplatform"), iconUrl: "/icons/ai.svg", description: "AI 챗·솔루션 허브", displayOrder: 1, isActive: true, category: "AI" },
@@ -126,6 +154,15 @@ function emailOf(userId) {
   const u = usersMem.find((x) => x.id === userId);
   return u ? u.email : undefined;
 }
+try {
+  const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  if (Array.isArray(saved.store) && saved.store.length) store = saved.store;
+  if (Array.isArray(saved.permMem)) permMem = saved.permMem;
+  if (Array.isArray(saved.auditMem)) auditMem = saved.auditMem;
+  if (saved.settingsMem) settingsMem = { ...settingsMem, ...saved.settingsMem };
+  if (Array.isArray(saved.usersMem) && saved.usersMem.length) usersMem = saved.usersMem;
+  console.log("[persist] restored");
+} catch { /* 첫 실행 */ }
 
 async function getAllApps() {
   if (!prisma) return store;
@@ -149,6 +186,7 @@ function publicSettings(s) {
     platformName: s.platformName, primaryColor: s.primaryColor, logoUrl: s.logoUrl,
     announcement: s.announcement || "", idleTimeoutMin: s.idleTimeoutMin || 3,
     menuOrder: s.menuOrder || [],
+    allowedDomains: s.allowedDomains || [DOMAIN],
     backgroundType: s.backgroundType || "color",
     backgroundColor: s.backgroundColor || "#FFF7ED",
     backgroundImage: s.backgroundImage || ""
@@ -158,6 +196,7 @@ async function audit(actorId, action, target, result) {
   const row = { id: `m-${Date.now()}-${Math.random().toString(36).slice(2)}`, actorId, action, target, result, createdAt: new Date().toISOString() };
   auditMem.unshift(row);
   auditMem = auditMem.slice(0, 500);
+  persist(); // 파일 영속화 (재시작해도 유지)
   if (!prisma) return console.log("[audit]", action, actorId, target || "", result);
   try {
     await prisma.auditLog.create({ data: { actorId, action, target, result } });
@@ -191,7 +230,13 @@ const AppCreateSchema = z.object({
   isActive: z.boolean().default(true),
   category: z.string().max(50).default("전체"),
   stripPrefix: z.boolean().default(false), // true: 상대가 basePath 없이 루트 서빙 → /apps/<slug> 제거하고 그대로 전달
-  openMode: z.enum(["embed", "direct"]).default("embed") // embed: /apps/<slug> 통합 보기, direct: targetUrl로 직접 이동
+  openMode: z.enum(["embed", "direct"]).default("embed"), // embed: /apps/<slug> 통합 보기, direct: targetUrl로 직접 이동
+  bgType: z.enum(["color", "image"]).default("color"),
+  bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#FFFFFF"),
+  bgImage: z.string().max(500).default("").refine(
+    (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
+    { message: "배경 이미지는 /uploads/ 또는 https:// 만 허용" }
+  )
 });
 const AppPatchSchema = z.object({
   id: z.string().min(1),
@@ -203,7 +248,13 @@ const AppPatchSchema = z.object({
   isActive: z.boolean().optional(),
   category: z.string().max(50).optional(),
   stripPrefix: z.boolean().optional(),
-  openMode: z.enum(["embed", "direct"]).optional()
+  openMode: z.enum(["embed", "direct"]).optional(),
+  bgType: z.enum(["color", "image"]).optional(),
+  bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  bgImage: z.string().max(500).optional().refine(
+    (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
+    { message: "배경 이미지는 /uploads/ 또는 https:// 만 허용" }
+  )
 });
 const LoginSchema = z.object({ email: z.string().email(), password: z.string().min(8) });
 
@@ -214,8 +265,12 @@ app.use(cookieParser());
 app.use("/subapps", express.static(path.join(__dirname, "subapps")));
 
 // 업로드 아이콘 저장소 (Docker volume 권장: ./uploads)
-const UPLOAD_DIR = path.join(__dirname, "uploads");
-try { require("fs").mkdirSync(UPLOAD_DIR, { recursive: true }); } catch { /* ignore */ }
+// (경로 상수는 파일 상단 store 선언부에서 정의 — TDZ 방지)
+function persist() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem }));
+  } catch (e) { console.log("[persist] fail", e.message); }
+}
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: false }));
 
 const UPLOAD_MIMES = {
@@ -635,6 +690,7 @@ const SettingsSchema = z.object({
   announcement: z.string().max(300).optional(),
   idleTimeoutMin: z.number().int().min(1).max(30).optional(),
   menuOrder: z.array(z.string().max(50)).max(50).optional(),
+  allowedDomains: z.array(z.string().max(100)).max(50).optional(),
   backgroundType: z.enum(["color", "image"]).optional(),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   backgroundImage: z.string().max(500).optional().refine(

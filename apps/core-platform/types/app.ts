@@ -9,6 +9,9 @@ export interface AppRegistry {
   category?: string;
   stripPrefix?: boolean;
   openMode?: "embed" | "direct";
+  bgType?: string;
+  bgColor?: string;
+  bgImage?: string;
 }
 
 export interface ShellLayoutProps {

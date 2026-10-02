@@ -8,10 +8,10 @@ type Tab = "overview" | "apps" | "categories" | "users" | "permissions" | "setti
 
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
-interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; }
+interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
 
-const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct" } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed" };
+const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct"; bgType: string; bgColor: string; bgImage: string } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed", bgType: "color", bgColor: "#FFFFFF", bgImage: "" };
 
 export default function Dashboard() {
   const router = useRouter();
@@ -19,7 +19,8 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRegistry[]>([]);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "" });
+  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [] });
+  const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
@@ -96,7 +97,8 @@ export default function Dashboard() {
         idleTimeoutMin: j.data.idleTimeoutMin ?? 3, menuOrder: j.data.menuOrder ?? [],
         backgroundType: j.data.backgroundType ?? "color",
         backgroundColor: j.data.backgroundColor ?? "#FFF7ED",
-        backgroundImage: j.data.backgroundImage ?? ""
+        backgroundImage: j.data.backgroundImage ?? "",
+        allowedDomains: j.data.allowedDomains ?? []
       });
     }).catch(() => {});
     fetch("/api/admin/users").then(async (r) => {
@@ -115,7 +117,7 @@ export default function Dashboard() {
     const next = { ...settings, ...patch };
     const { ok, j } = await api("/api/admin/settings", {
       method: "PUT", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ platformName: next.platformName, primaryColor: next.primaryColor, logoUrl: next.logoUrl, announcement: next.announcement, idleTimeoutMin: Number(next.idleTimeoutMin), menuOrder: next.menuOrder, backgroundType: next.backgroundType, backgroundColor: next.backgroundColor, backgroundImage: next.backgroundImage })
+      body: JSON.stringify({ platformName: next.platformName, primaryColor: next.primaryColor, logoUrl: next.logoUrl, announcement: next.announcement, idleTimeoutMin: Number(next.idleTimeoutMin), menuOrder: next.menuOrder, backgroundType: next.backgroundType, backgroundColor: next.backgroundColor, backgroundImage: next.backgroundImage, allowedDomains: next.allowedDomains })
     });
     setToast(ok ? { id: Date.now(), text: done, ok: true } : { id: Date.now(), text: j.error?.message ?? "실패", ok: false });
     if (ok) setSettings(next);
@@ -136,7 +138,7 @@ export default function Dashboard() {
     if (!editing) return;
     const { ok, j } = await api("/api/admin/apps", {
       method: "PATCH", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: editing.id, name: editing.name, slug: editing.slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed" })
+      body: JSON.stringify({ id: editing.id, name: editing.name, slug: editing.slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "" })
     });
     result(ok, "수정됨 → 런처에 즉시 반영", j);
     if (ok) { setEditing(null); load(); }
@@ -401,6 +403,22 @@ export default function Dashboard() {
                       <option value="direct">직접 이동 (targetUrl로 이동)</option>
                     </select>
                   </label>
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">카드 배경
+                    <span className="flex gap-2">
+                      <select className={input} value={editing.bgType || "color"} onChange={(e) => setEditing({ ...editing, bgType: e.target.value })} aria-label="카드 배경 방식">
+                        <option value="color">단색(RGB)</option>
+                        <option value="image">이미지</option>
+                      </select>
+                      {(editing.bgType || "color") === "color" ? (
+                        <span className="flex gap-2 flex-1">
+                          <input type="color" className="min-h-[48px] min-w-[48px]" value={editing.bgColor || "#FFFFFF"} onChange={(e) => setEditing({ ...editing, bgColor: e.target.value })} aria-label="카드 배경 색상" />
+                          <input className={`${input} flex-1`} value={editing.bgColor || "#FFFFFF"} onChange={(e) => setEditing({ ...editing, bgColor: e.target.value })} />
+                        </span>
+                      ) : (
+                        <input className={`${input} flex-1`} placeholder="/uploads/카드.png 또는 https://…" value={editing.bgImage || ""} onChange={(e) => setEditing({ ...editing, bgImage: e.target.value })} />
+                      )}
+                    </span>
+                  </label>
                   <div className="flex gap-2">
                     <button type="submit" className={`${primary} flex-1`}>저장</button>
                     <button type="button" className={`${btn}`} onClick={() => setEditing(null)}>취소</button>
@@ -551,6 +569,22 @@ export default function Dashboard() {
                 </label>
               )}
               <button className={primary} onClick={() => saveSettings({})}>설정 저장 → 런처에 반영</button>
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">허용 도메인 (앱 등록 Allowlist)</h2>
+            <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4">
+              <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500 mb-2">여기에 없는 도메인의 앱 주소는 등록이 차단됩니다. (예: kakaotaxi.com)</p>
+              <ul className="grid gap-1 mb-2">
+                {(settings.allowedDomains || []).map((d) => (
+                  <li key={d} className="flex items-center gap-2 text-[clamp(14px,2vw,16px)] border-b py-2">
+                    <span className="flex-1">{d}</span>
+                    <button className={btn} onClick={() => saveSettings({ allowedDomains: (settings.allowedDomains || []).filter((x) => x !== d) }, "허용 도메인 삭제됨")}>삭제</button>
+                  </li>
+                ))}
+              </ul>
+              <form onSubmit={(e) => { e.preventDefault(); const v = newDomain.trim(); if (!v) return; saveSettings({ allowedDomains: [...(settings.allowedDomains || []), v] }, "허용 도메인 추가됨"); setNewDomain(""); }} className="flex gap-2">
+                <input className={`${input} flex-1`} placeholder="example.com" value={newDomain} onChange={(e) => setNewDomain(e.target.value)} aria-label="새 허용 도메인" />
+                <button className={primary}>추가</button>
+              </form>
             </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">타이틀 미리보기</h2>
             <div className="max-w-lg border rounded-2xl p-4 bg-white">

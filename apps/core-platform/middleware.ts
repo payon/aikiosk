@@ -57,8 +57,11 @@ export async function middleware(req: NextRequest) {
   if (!found) return NextResponse.next();
 
   // 레지스트리는 백엔드(API 서버)에서 조회 — 프론트는 DB를 직접 읽지 않는다.
+  // 등록 시점에 백엔드가 Allowlist 검증을 마치므로, 레지스트리에 있는 앱은 신뢰하고 rewrite.
+  // 미등록 slug 폴백에만 정적 Allowlist를 적용한다.
   let targetBase: string | null = null;
   let strip = false;
+  let registered = false;
   try {
     const r = await fetch(`${BACKEND}/api/apps`, { next: { revalidate: 60 } });
     if (r.ok) {
@@ -67,12 +70,13 @@ export async function middleware(req: NextRequest) {
       if (app) {
         targetBase = app.targetUrl;
         strip = app.stripPrefix === true;
+        registered = true;
       }
     }
   } catch { /* 폴백 */ }
   targetBase ??= `https://${found.slug}.${DEFAULT_ALLOWED[0]}`;
 
-  if (!isAllowedTarget(targetBase, DEFAULT_ALLOWED)) {
+  if (!registered && !isAllowedTarget(targetBase, DEFAULT_ALLOWED)) {
     return new NextResponse("Forbidden", { status: 403 });
   }
   // 실제 통합 URL로 rewrite (단일도메인 SSO 유지, 프레임 태그 미사용)

@@ -31,6 +31,9 @@ model Application {
   category     String?
   stripPrefix  Boolean                @default(false)
   openMode     String                 @default("embed")
+  bgType       String                 @default("color")
+  bgColor      String                 @default("#FFFFFF")
+  bgImage      String                 @default("")
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
   permissions  UserAppPermission[]
