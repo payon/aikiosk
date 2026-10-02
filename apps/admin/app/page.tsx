@@ -25,12 +25,25 @@ export default function Dashboard() {
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
+  const [toast, setToast] = useState<{ id: number; text: string; ok: boolean } | null>(null);
+
+  function notify(text: string, ok = true) {
+    setToast({ id: Date.now(), text, ok });
+  }
+  function result(ok: boolean, okText: string, j: { error?: { message?: string } }, failDefault = "실패") {
+    if (ok) notify(okText);
+    else notify(j.error?.message ?? failDefault, false);
+  }
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
   const [form, setForm] = useState(EMPTY_APP);
   const [editing, setEditing] = useState<(AppRegistry & { id: string }) | null>(null);
   const [perm, setPerm] = useState({ email: "", slug: "", accessLevel: "VIEW" });
   const [rename, setRename] = useState({ from: "", to: "" });
   const [moveTo, setMoveTo] = useState("전체");
-  const [msg, setMsg] = useState("");
   const [uploading, setUploading] = useState(false);
 
   async function uploadIcon(file: File): Promise<string | null> {
@@ -47,11 +60,11 @@ export default function Dashboard() {
         body: JSON.stringify({ filename: file.name, dataUrl })
       });
       const j = await r.json();
-      if (r.ok && j.success) { setMsg(`아이콘 업로드됨: ${j.data.url}`); return j.data.url as string; }
-      setMsg(j.error?.message ?? "업로드 실패 (png/jpg/webp/svg, 1.5MB 이하)");
+      if (r.ok && j.success) { notify(`아이콘 업로드됨: ${j.data.url}`); return j.data.url as string; }
+      notify(j.error?.message ?? "업로드 실패 (png/jpg/webp/svg, 1.5MB 이하)", false);
       return null;
     } catch {
-      setMsg("업로드 실패");
+      notify("업로드 실패", false);
       return null;
     } finally {
       setUploading(false);
@@ -104,7 +117,7 @@ export default function Dashboard() {
       method: "PUT", headers: { "content-type": "application/json" },
       body: JSON.stringify({ platformName: next.platformName, primaryColor: next.primaryColor, logoUrl: next.logoUrl, announcement: next.announcement, idleTimeoutMin: Number(next.idleTimeoutMin), menuOrder: next.menuOrder, backgroundType: next.backgroundType, backgroundColor: next.backgroundColor, backgroundImage: next.backgroundImage })
     });
-    setMsg(ok ? done : (j.error?.message ?? "실패"));
+    setToast(ok ? { id: Date.now(), text: done, ok: true } : { id: Date.now(), text: j.error?.message ?? "실패", ok: false });
     if (ok) setSettings(next);
   }
 
@@ -114,7 +127,7 @@ export default function Dashboard() {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...form, displayOrder: apps.length, isActive: true })
     });
-    setMsg(ok ? "등록됨 → 런처에 즉시 반영" : (j.error?.message ?? "실패"));
+    result(ok, "등록됨 → 런처에 즉시 반영", j);
     if (ok) { setForm(EMPTY_APP); load(); }
   }
 
@@ -125,18 +138,21 @@ export default function Dashboard() {
       method: "PATCH", headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: editing.id, name: editing.name, slug: editing.slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed" })
     });
-    setMsg(ok ? "수정됨 → 런처에 즉시 반영" : (j.error?.message ?? "실패"));
+    result(ok, "수정됨 → 런처에 즉시 반영", j);
     if (ok) { setEditing(null); load(); }
   }
 
   async function patch(id: string, data: Partial<AppRegistry>) {
-    await api("/api/admin/apps", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...data }) });
+    const { ok, j } = await api("/api/admin/apps", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...data }) });
+    result(ok, "수정됨 → 런처에 즉시 반영", j);
     load();
   }
 
   async function remove(id: string) {
     if (!confirm("삭제하시겠습니까?")) return;
-    await fetch(`/api/admin/apps?id=${id}`, { method: "DELETE" });
+    const r = await fetch(`/api/admin/apps?id=${id}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    result(r.ok && j.success, "삭제됨 → 런처에 즉시 반영", j);
     load();
   }
 
@@ -155,13 +171,15 @@ export default function Dashboard() {
     const { ok, j } = await api("/api/admin/permissions", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(perm)
     });
-    setMsg(ok ? "권한 부여됨" : (j.error?.message ?? "실패"));
+    result(ok, "권한 부여됨", j);
     if (ok) load();
   }
 
   async function revoke(email: string, slug: string) {
     if (!confirm(`${email} / ${slug} 권한을 회수할까요?`)) return;
-    await fetch(`/api/admin/permissions?email=${encodeURIComponent(email)}&slug=${encodeURIComponent(slug)}`, { method: "DELETE" });
+    const r = await fetch(`/api/admin/permissions?email=${encodeURIComponent(email)}&slug=${encodeURIComponent(slug)}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    result(r.ok && j.success, "권한 회수됨", j);
     load();
   }
 
@@ -170,7 +188,7 @@ export default function Dashboard() {
     const { ok, j } = await api("/api/admin/users", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(newUser)
     });
-    setMsg(ok ? "사용자 생성됨" : (j.error?.message ?? "실패"));
+    result(ok, "사용자 생성됨", j);
     if (ok) { setNewUser({ email: "", password: "", role: "USER" }); load(); }
   }
 
@@ -178,7 +196,7 @@ export default function Dashboard() {
     const { ok, j } = await api("/api/admin/users", {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...data })
     });
-    setMsg(ok ? "사용자 수정됨" : (j.error?.message ?? "실패"));
+    result(ok, "사용자 수정됨", j);
     if (ok) load();
   }
 
@@ -186,7 +204,7 @@ export default function Dashboard() {
     if (!confirm(`${email} 사용자를 삭제할까요?`)) return;
     const r = await fetch(`/api/admin/users?id=${id}`, { method: "DELETE" });
     const j = await r.json().catch(() => ({}));
-    setMsg(r.ok && j.success ? "사용자 삭제됨" : (j.error?.message ?? "실패"));
+    result(r.ok && j.success, "사용자 삭제됨", j);
     load();
   }
 
@@ -204,14 +222,14 @@ export default function Dashboard() {
     const { ok, j } = await api("/api/admin/categories", {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(rename)
     });
-    setMsg(ok ? `카테고리 변경됨 (${j.data?.renamed ?? 0}개 앱)` : (j.error?.message ?? "실패"));
+    result(ok, `카테고리 변경됨 (${j.data?.renamed ?? 0}개 앱)`, j);
     if (ok) { setRename({ from: "", to: "" }); load(); }
   }
 
   async function deleteCat(name: string) {
     if (!confirm(`카테고리 "${name}" 삭제 — 소속 앱은 "${moveTo}"로 이동합니다. 계속할까요?`)) return;
     const { ok, j } = await api(`/api/admin/categories?from=${encodeURIComponent(name)}&moveTo=${encodeURIComponent(moveTo)}`, { method: "DELETE" });
-    setMsg(ok ? `삭제됨 (${j.data?.moved ?? 0}개 앱 이동)` : (j.error?.message ?? "실패"));
+    result(ok, `삭제됨 (${j.data?.moved ?? 0}개 앱 이동)`, j);
     if (ok) load();
   }
 
@@ -291,7 +309,12 @@ export default function Dashboard() {
       )}
 
       <main className="flex-1 p-4 pb-24 md:pb-4 max-w-5xl">
-        {msg && <p className="mb-3 text-[clamp(14px,2vw,16px)] bg-white border rounded-lg p-3" role="status">{msg}</p>}
+      {toast && (
+        <div role="status" aria-live="polite"
+          className={`fixed left-4 right-4 md:left-auto md:right-6 bottom-20 md:bottom-6 z-40 rounded-xl border px-4 min-h-[56px] flex items-center text-[clamp(14px,2vw,16px)] shadow-lg ${toast.ok ? "bg-gray-900 text-white border-gray-900" : "bg-white text-red-700 border-red-300"}`}>
+          {toast.ok ? "✓ " : "✕ "}{toast.text}
+        </div>
+      )}
 
         {tab === "overview" && (
           <section>
