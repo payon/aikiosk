@@ -24,6 +24,9 @@ interface Platform {
   backgroundType: string;
   backgroundColor: string;
   backgroundImage: string;
+  gridDensity: string;
+  gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number };
+  showAppName: boolean;
 }
 
 // 서버 렌더: 첫 HTML에 아이콘·글자가 바로 박힌다 (빈 화면 방지)
@@ -33,7 +36,9 @@ export default async function LauncherPage() {
     get<{ name: string; count: number }[]>("/api/categories", []),
     get<Platform>("/api/platform", {
       platformName: "RustKorea Hub", announcement: "", idleTimeoutMin: 3,
-      backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: ""
+      backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "",
+      gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 },
+      showAppName: true
     })
   ]);
   const bodyStyle: CSSProperties =
@@ -42,7 +47,12 @@ export default async function LauncherPage() {
       : { backgroundColor: platform.backgroundColor || "#FFF7ED" };
   return (
     <Shell apps={apps} brand={platform.platformName} idleMin={platform.idleTimeoutMin} bodyStyle={bodyStyle}>
-      <LauncherClient initialApps={apps} initialCats={cats} announcement={platform.announcement} />
+      <LauncherClient
+        initialApps={apps}
+        initialCats={cats}
+        announcement={platform.announcement}
+        grid={{ density: platform.gridDensity === "compact" ? "compact" : "comfortable", cols: platform.gridCols, showName: platform.showAppName !== false }}
+      />
     </Shell>
   );
 }

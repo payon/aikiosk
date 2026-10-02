@@ -1,16 +1,17 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { AppGrid } from "@/components/AppGrid";
+import { AppGrid, type GridConfig } from "@/components/AppGrid";
 import type { AppRegistry } from "@/types/app";
 
 interface Props {
   initialApps: AppRegistry[];
   initialCats: { name: string; count: number }[];
   announcement: string;
+  grid: GridConfig;
 }
 
-export function LauncherClient({ initialApps, initialCats, announcement }: Props) {
+export function LauncherClient({ initialApps, initialCats, announcement, grid }: Props) {
   const router = useRouter();
   const [apps, setApps] = useState(initialApps);
   const [cats, setCats] = useState(initialCats);
@@ -73,6 +74,7 @@ export function LauncherClient({ initialApps, initialCats, announcement }: Props
       {filtered.length > 0 && (
         <AppGrid
           apps={filtered}
+          config={grid}
           onAppClick={(slug) => {
             const app = filtered.find((a) => a.slug === slug);
             if (app?.openMode === "direct") window.location.href = app.targetUrl;

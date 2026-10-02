@@ -8,7 +8,7 @@ type Tab = "overview" | "apps" | "categories" | "users" | "permissions" | "setti
 
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
-interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; }
+interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
 
 const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct"; bgType: string; bgColor: string; bgImage: string } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed", bgType: "color", bgColor: "#FFFFFF", bgImage: "" };
@@ -19,7 +19,7 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRegistry[]>([]);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [] });
+  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true });
   const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
@@ -98,7 +98,10 @@ export default function Dashboard() {
         backgroundType: j.data.backgroundType ?? "color",
         backgroundColor: j.data.backgroundColor ?? "#FFF7ED",
         backgroundImage: j.data.backgroundImage ?? "",
-        allowedDomains: j.data.allowedDomains ?? []
+        allowedDomains: j.data.allowedDomains ?? [],
+        gridDensity: j.data.gridDensity ?? "comfortable",
+        gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(j.data.gridCols || {}) },
+        showAppName: j.data.showAppName !== false
       });
     }).catch(() => {});
     fetch("/api/admin/users").then(async (r) => {
@@ -449,6 +452,7 @@ export default function Dashboard() {
                       <select className={input} value={editing.bgType || "color"} onChange={(e) => setEditing({ ...editing, bgType: e.target.value })} aria-label="카드 배경 방식">
                         <option value="color">단색(RGB)</option>
                         <option value="image">이미지</option>
+                        <option value="none">없음(투명, 아이콘만)</option>
                       </select>
                       {(editing.bgType || "color") === "color" ? (
                         <span className="flex gap-2 flex-1">
@@ -624,6 +628,28 @@ export default function Dashboard() {
                 </label>
               )}
               <button className={primary} onClick={() => saveSettings({})}>설정 저장 → 런처에 반영</button>
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">그리드 밀도 (한 화면 최대 아이콘)</h2>
+            <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4 grid gap-2">
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">표시 모드
+                <select className={input} value={settings.gridDensity} onChange={(e) => setSettings({ ...settings, gridDensity: e.target.value })} aria-label="그리드 밀도">
+                  <option value="comfortable">여유롭게 (카드+이름+설명)</option>
+                  <option value="compact">빽빽하게 (아이콘 위주, 한 화면 최대)</option>
+                </select>
+              </label>
+              {(["mobile", "tablet", "desktop", "kiosk"] as const).map((k) => (
+                <label key={k} className="grid gap-1 text-[clamp(14px,2vw,16px)]">
+                  {k === "mobile" ? "모바일 열수" : k === "tablet" ? "태블릿 열수" : k === "desktop" ? "데스크탑 열수" : "키오스크(55인치·4K) 열수"}
+                  <input type="number" min={1} max={12} className={input}
+                    value={settings.gridCols[k]} onChange={(e) => setSettings({ ...settings, gridCols: { ...settings.gridCols, [k]: Number(e.target.value) } })}
+                    aria-label={`${k} 열수`} />
+                </label>
+              ))}
+              <label className="flex items-center gap-2 min-h-[48px] text-[clamp(14px,2vw,16px)]">
+                <input type="checkbox" className="w-6 h-6" checked={settings.showAppName} onChange={(e) => setSettings({ ...settings, showAppName: e.target.checked })} />
+                앱 이름 표시
+              </label>
+              <button className={primary} onClick={() => saveSettings({ gridDensity: settings.gridDensity, gridCols: settings.gridCols, showAppName: settings.showAppName })}>그리드 저장 → 런처에 반영</button>
             </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">허용 도메인 (앱 등록 Allowlist)</h2>
             <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4">

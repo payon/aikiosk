@@ -144,7 +144,9 @@ let settingsMem = {
   platformDomain: DOMAIN, platformName: "러스트코리아", primaryColor: "#C2410C",
   logoUrl: "/logo.svg", allowedDomains: [DOMAIN],
   announcement: "", idleTimeoutMin: 3, menuOrder: [],
-  backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: ""
+  backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "",
+  gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 },
+  showAppName: true
 };
 // 인메모리 사용자 (DB 없을 때 CRUD 시연용, 비밀번호 bcrypt 해시)
 const bcryptSync = require("bcryptjs");
@@ -206,7 +208,10 @@ function publicSettings(s) {
     allowedDomains: s.allowedDomains || [DOMAIN],
     backgroundType: s.backgroundType || "color",
     backgroundColor: s.backgroundColor || "#FFF7ED",
-    backgroundImage: s.backgroundImage || ""
+    backgroundImage: s.backgroundImage || "",
+    gridDensity: s.gridDensity || "comfortable",
+    gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(s.gridCols || {}) },
+    showAppName: s.showAppName !== false
   };
 }
 async function audit(actorId, action, target, result) {
@@ -256,7 +261,7 @@ const AppCreateSchema = z.object({
   category: z.string().max(50).default("전체"),
   stripPrefix: z.boolean().default(false), // true: 상대가 basePath 없이 루트 서빙 → /apps/<slug> 제거하고 그대로 전달
   openMode: z.enum(["embed", "direct"]).default("embed"), // embed: /apps/<slug> 통합 보기, direct: targetUrl로 직접 이동
-  bgType: z.enum(["color", "image"]).default("color"),
+  bgType: z.enum(["color", "image", "none"]).default("color"),
   bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#FFFFFF"),
   bgImage: z.string().max(500).default("").refine(
     (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
@@ -275,7 +280,7 @@ const AppPatchSchema = z.object({
   category: z.string().max(50).optional(),
   stripPrefix: z.boolean().optional(),
   openMode: z.enum(["embed", "direct"]).optional(),
-  bgType: z.enum(["color", "image"]).optional(),
+  bgType: z.enum(["color", "image", "none"]).optional(),
   bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   bgImage: z.string().max(500).optional().refine(
     (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
@@ -761,6 +766,12 @@ app.delete("/api/admin/users", requireAdmin, async (req, res) => {
 });
 
 // ----- Admin: settings -----
+const GridColsSchema = z.object({
+  mobile: z.number().int().min(2).max(8).default(2),
+  tablet: z.number().int().min(2).max(8).default(3),
+  desktop: z.number().int().min(2).max(10).default(4),
+  kiosk: z.number().int().min(2).max(12).default(5)
+});
 const SettingsSchema = z.object({
   platformName: z.string().min(1).max(100).optional(),
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
@@ -768,6 +779,9 @@ const SettingsSchema = z.object({
   announcement: z.string().max(300).optional(),
   idleTimeoutMin: z.number().int().min(1).max(30).optional(),
   menuOrder: z.array(z.string().max(50)).max(50).optional(),
+  gridDensity: z.enum(["comfortable", "compact"]).optional(),
+  gridCols: GridColsSchema.partial().optional(),
+  showAppName: z.boolean().optional(),
   allowedDomains: z.array(z.string().max(100)).max(50).optional().refine(
     (v) => !v || !v.some((d) => ["169.254.169.254", "0.0.0.0", "localhost", "127.0.0.1", "::1"].includes(d.trim())),
     { message: "메타IP·로컬호스트는 허용 목록에 불가" }

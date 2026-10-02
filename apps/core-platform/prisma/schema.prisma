@@ -67,6 +67,9 @@ model PlatformSetting {
   backgroundType String   @default("color")
   backgroundColor String  @default("#FFF7ED")
   backgroundImage String  @default("")
+  gridDensity   String   @default("comfortable")
+  gridCols      Json?
+  showAppName   Boolean  @default(true)
   updatedAt      DateTime @updatedAt
 }
 
