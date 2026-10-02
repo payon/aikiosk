@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_APP);
   const [editing, setEditing] = useState<(AppRegistry & { id: string }) | null>(null);
   const [perm, setPerm] = useState({ email: "", slug: "", accessLevel: "VIEW" });
@@ -228,19 +229,22 @@ export default function Dashboard() {
   const input = "min-h-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const btn = "min-h-[48px] min-w-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const primary = "min-h-[48px] rounded-lg bg-gray-900 text-white px-4 text-[clamp(16px,2vw,24px)]";
-  const tabs: { id: Tab; label: string }[] = [
+  const mainTabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "개요" },
     { id: "apps", label: "앱 관리" },
-    { id: "categories", label: "카테고리·메뉴" },
+    { id: "categories", label: "카테고리" }
+  ];
+  const moreTabs: { id: Tab; label: string }[] = [
     { id: "users", label: "사용자" },
     { id: "permissions", label: "권한" },
     { id: "settings", label: "설정" },
     { id: "audit", label: "감사 로그" }
   ];
+  const tabs = [...mainTabs, ...moreTabs];
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-gray-50">
-      <aside className="md:w-[280px] shrink-0 bg-gray-900 text-white p-4 flex md:flex-col gap-2 overflow-x-auto">
+      <aside className="hidden md:flex md:w-[280px] shrink-0 bg-gray-900 text-white p-4 md:flex-col gap-2 overflow-x-auto">
         <b className="text-[clamp(16px,2vw,24px)] px-2 whitespace-nowrap">관리자</b>
         {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -252,7 +256,41 @@ export default function Dashboard() {
         <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); }} className="min-h-[48px] text-left rounded-lg px-3 text-[clamp(14px,2vw,16px)] hover:bg-gray-700">로그아웃</button>
       </aside>
 
-      <main className="flex-1 p-4 max-w-5xl">
+      {/* 모바일 하단 탭 바 */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-gray-900 text-white border-t border-gray-700 flex" aria-label="관리자 하단 메뉴">
+        {mainTabs.map((t) => (
+          <button key={t.id} onClick={() => { setTab(t.id); setMoreOpen(false); }}
+            aria-pressed={tab === t.id}
+            className={`flex-1 min-h-[56px] flex items-center justify-center text-[clamp(13px,2vw,15px)] ${tab === t.id ? "font-bold bg-gray-700" : ""}`}>
+            {t.label}
+          </button>
+        ))}
+        <button onClick={() => setMoreOpen((v) => !v)}
+          aria-expanded={moreOpen} aria-label="더보기"
+          className={`flex-1 min-h-[56px] flex items-center justify-center text-[clamp(13px,2vw,15px)] ${moreOpen || moreTabs.some((t) => t.id === tab) ? "font-bold bg-gray-700" : ""}`}>
+          더보기
+        </button>
+      </nav>
+
+      {/* 더보기 시트 */}
+      {moreOpen && (
+        <div className="md:hidden fixed inset-0 z-30" role="dialog" aria-label="더보기 메뉴">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMoreOpen(false)} />
+          <div className="absolute bottom-0 inset-x-0 bg-white rounded-t-2xl p-4 pb-8 flex flex-col gap-1">
+            {moreTabs.map((t) => (
+              <button key={t.id} onClick={() => { setTab(t.id); setMoreOpen(false); window.scrollTo(0, 0); }}
+                className={`min-h-[56px] text-left rounded-lg px-3 text-[clamp(15px,2vw,17px)] ${tab === t.id ? "bg-gray-900 text-white font-bold" : "hover:bg-gray-100"}`}>
+                {t.label}
+              </button>
+            ))}
+            <a href={LAUNCHER} className="min-h-[56px] flex items-center rounded-lg px-3 text-[clamp(15px,2vw,17px)] hover:bg-gray-100">런처 열기 ↗</a>
+            <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); }}
+              className="min-h-[56px] text-left rounded-lg px-3 text-[clamp(15px,2vw,17px)] hover:bg-gray-100">로그아웃</button>
+          </div>
+        </div>
+      )}
+
+      <main className="flex-1 p-4 pb-24 md:pb-4 max-w-5xl">
         {msg && <p className="mb-3 text-[clamp(14px,2vw,16px)] bg-white border rounded-lg p-3" role="status">{msg}</p>}
 
         {tab === "overview" && (
