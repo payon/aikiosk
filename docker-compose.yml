@@ -1,0 +1,64 @@
+# RustKorea Unified Platform (운영용)
+# 외부 공개: 4500 단일 포트. 내부는 Docker 네트워크로만 통신한다.
+services:
+  backend:
+    build: ./apps/api-server
+    environment:
+      PORT: "4501"
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 필수}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET 필수}
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-rustkorea.cloud}
+      LOCAL_APPS: "false"
+      ALLOW_LOCAL_APPS: "false"
+    expose: ["4501"]
+    restart: unless-stopped
+
+  launcher:
+    build: ./apps/core-platform
+    environment:
+      PORT: "4500"
+      NODE_ENV: production
+      API_INTERNAL_URL: http://backend:4501
+      ADMIN_INTERNAL_URL: http://admin:4502
+      NEXT_PUBLIC_PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-rustkorea.cloud}
+      NEXT_PUBLIC_ADMIN_URL: /admin
+      ALLOW_LOCAL_APPS: "false"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 필수}
+    ports: ["4500:4500"]
+    depends_on: [backend, admin, library, aiplatform, healthcare]
+    restart: unless-stopped
+
+  admin:
+    build: ./apps/admin
+    environment:
+      PORT: "4502"
+      NODE_ENV: production
+      API_INTERNAL_URL: http://backend:4501
+      NEXT_PUBLIC_LAUNCHER_URL: /
+    expose: ["4502"]
+    restart: unless-stopped
+
+  library:
+    build:
+      context: ./apps/library
+      args: { APP_PORT: "4511" }
+    environment: { PORT: "4511", NODE_ENV: production }
+    expose: ["4511"]
+    restart: unless-stopped
+
+  aiplatform:
+    build:
+      context: ./apps/aiplatform
+      args: { APP_PORT: "4512" }
+    environment: { PORT: "4512", NODE_ENV: production }
+    expose: ["4512"]
+    restart: unless-stopped
+
+  healthcare:
+    build:
+      context: ./apps/healthcare
+      args: { APP_PORT: "4513" }
+    environment: { PORT: "4513", NODE_ENV: production }
+    expose: ["4513"]
+    restart: unless-stopped

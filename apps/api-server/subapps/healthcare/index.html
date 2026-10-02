@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>헬스케어 대시보드</title>
+<style>
+  * { box-sizing: border-box; touch-action: manipulation; }
+  body { margin: 0; font-family: sans-serif; background: #F0FDF4; color: #052e16; }
+  header { background: #15803D; color: #fff; padding: 12px 16px; display: flex; gap: 8px; align-items: center; }
+  header a { color: #fff; min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; text-decoration: none; font-size: clamp(14px,2vw,16px); }
+  h1 { font-size: clamp(20px,3vw,32px); margin: 0; }
+  main { padding: 16px; max-width: 900px; margin: 0 auto; display: grid; gap: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+  @media (min-width: 768px) { .cards { grid-template-columns: repeat(4,1fr); } }
+  .stat { background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .stat b { display: block; font-size: clamp(24px,4vw,40px); }
+  .stat span { font-size: clamp(12px,1.5vw,14px); color: #4d7c5f; }
+  .panel { background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .panel h2 { font-size: clamp(16px,2.5vw,22px); margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: clamp(14px,2vw,16px); }
+  th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #dcfce7; min-height: 48px; }
+  .bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: clamp(12px,1.5vw,14px); }
+  .bar i { display: block; height: 24px; border-radius: 6px; background: #16a34a; min-width: 8px; }
+</style>
+</head>
+<body>
+<header><a href="/" aria-label="런처로">← 런처</a><h1>헬스케어 대시보드</h1></header>
+<main>
+  <div class="cards">
+    <div class="stat"><b id="s1">-</b><span>오늘 걸음 수</span></div>
+    <div class="stat"><b id="s2">-</b><span>평균 심박 (bpm)</span></div>
+    <div class="stat"><b id="s3">-</b><span>수면 시간</span></div>
+    <div class="stat"><b id="s4">-</b><span>복약 순응도</span></div>
+  </div>
+  <div class="panel"><h2>주간 활동량</h2><div id="chart"></div></div>
+  <div class="panel"><h2>최근 검진</h2>
+    <table><thead><tr><th>일자</th><th>항목</th><th>결과</th></tr></thead>
+    <tbody id="rows"></tbody></table>
+  </div>
+</main>
+<script>
+const steps = [8230, 10240, 6540, 11890, 9320, 12040, 7650];
+const days = ["월", "화", "수", "목", "금", "토", "일"];
+document.getElementById("s1").textContent = steps.reduce((a, b) => a + b, 0).toLocaleString();
+document.getElementById("s2").textContent = "72";
+document.getElementById("s3").textContent = "7h 12m";
+document.getElementById("s4").textContent = "96%";
+const chart = document.getElementById("chart");
+const max = Math.max(...steps);
+steps.forEach((v, i) => {
+  const d = document.createElement("div");
+  d.className = "bar";
+  d.innerHTML = `<span style="width:24px">${days[i]}</span><i style="width:${Math.round(v / max * 100)}%"></i><span>${v.toLocaleString()}</span>`;
+  chart.appendChild(d);
+});
+[["09-28", "혈압", "120/80 정상"], ["09-20", "혈당", "98mg/dL 정상"], ["09-12", "콜레스테롤", "185mg/dL 주의"]].forEach(r => {
+  const tr = document.createElement("tr");
+  r.forEach(c => { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+  document.getElementById("rows").appendChild(tr);
+});
+</script>
+</body>
+</html>

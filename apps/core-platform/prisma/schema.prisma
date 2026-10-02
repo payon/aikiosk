@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String              @id @default(uuid())
+  email        String              @unique
+  passwordHash String
+  role         Role                @default(USER)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  permissions  UserAppPermission[]
+  sessions     Session[]
+}
+
+model Application {
+  id           String              @id @default(uuid())
+  name         String
+  slug         String              @unique
+  targetUrl    String
+  iconUrl      String
+  description  String?
+  isActive     Boolean             @default(true)
+  displayOrder Int                 @default(0)
+  tenantId     String?
+  category     String?
+  stripPrefix  Boolean                @default(false)
+  openMode     String                 @default("embed")
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  permissions  UserAppPermission[]
+
+  @@index([slug, isActive])
+  @@index([tenantId])
+}
+
+model UserAppPermission {
+  id          String      @id @default(uuid())
+  userId      String
+  appId       String
+  accessLevel AccessLevel @default(VIEW)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  app         Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, appId])
+}
+
+model PlatformSetting {
+  id             String   @id @default(uuid())
+  platformDomain String   @unique
+  platformName   String
+  primaryColor   String   @default("#C2410C")
+  logoUrl        String   @default("/logo.svg")
+  allowedDomains String[]
+  announcement   String   @default("")
+  idleTimeoutMin Int      @default(3)
+  menuOrder      String[]
+  updatedAt      DateTime @updatedAt
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  expiresAt DateTime
+  idleAt    DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  action    String
+  target    String?
+  result    String
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum AccessLevel {
+  VIEW
+  ADMIN
+}

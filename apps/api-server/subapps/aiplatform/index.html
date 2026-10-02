@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Platform</title>
+<style>
+  * { box-sizing: border-box; touch-action: manipulation; }
+  body { margin: 0; font-family: sans-serif; background: #EFF6FF; color: #172554; display: flex; flex-direction: column; height: 100dvh; }
+  header { background: #1D4ED8; color: #fff; padding: 12px 16px; display: flex; gap: 8px; align-items: center; }
+  header a { color: #fff; min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; text-decoration: none; font-size: clamp(14px,2vw,16px); }
+  h1 { font-size: clamp(20px,3vw,32px); margin: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 800px; width: 100%; margin: 0 auto; }
+  .msg { max-width: 85%; padding: 12px; border-radius: 14px; font-size: clamp(14px,2vw,16px); line-height: 1.5; }
+  .me { align-self: flex-end; background: #1D4ED8; color: #fff; }
+  .ai { align-self: flex-start; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  form { display: flex; gap: 8px; padding: 12px 16px; max-width: 800px; width: 100%; margin: 0 auto; }
+  input { flex: 1; min-height: 48px; border: 1px solid #bfdbfe; border-radius: 12px; padding: 0 12px; font-size: clamp(14px,2vw,16px); }
+  button { min-height: 48px; min-width: 48px; padding: 0 20px; border: 0; border-radius: 12px; background: #1D4ED8; color: #fff; font-size: clamp(14px,2vw,16px); }
+</style>
+</head>
+<body>
+<header><a href="/" aria-label="런처로">← 런처</a><h1>AI Platform</h1></header>
+<div id="log" aria-live="polite" aria-label="대화"></div>
+<form id="f"><input id="q" placeholder="질문을 입력하세요 (예: 요금제)" aria-label="질문 입력" autocomplete="off"><button>전송</button></form>
+<script>
+const log = document.getElementById("log");
+function add(text, who) {
+  const d = document.createElement("div");
+  d.className = "msg " + who;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+function answer(q) {
+  if (/요금|가격|비용/.test(q)) return "요금제는 Starter(무료) / Pro(월 19,000원) / Enterprise(별도 협의) 3종입니다. Pro는 무제한 앱 등록과 감사 로그 1년 보관을 제공합니다.";
+  if (/앱|등록|추가/.test(q)) return "관리자 앱에서 이름·슬러그·URL·카테고리를 입력하면 런처에 즉시 반영됩니다. URL은 허용 도메인 검증을 통과해야 합니다.";
+  if (/키오스크/.test(q)) return "21~55인치 세로형 키오스크를 지원합니다. 3분 유휴 시 자동 로그아웃되고, 모든 터치 타겟은 48px 이상입니다.";
+  if (/안녕|hello/i.test(q)) return "안녕하세요! 통합 플랫폼 도우미입니다. 요금제·앱 등록·키오스크에 대해 물어보세요.";
+  return `"${q}"에 대한 답변을 준비 중입니다. (데모 응답) 요금제, 앱 등록, 키오스크 중 하나를 물어보세요.`;
+}
+add("안녕하세요! 무엇을 도와드릴까요?", "ai");
+document.getElementById("f").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = document.getElementById("q");
+  const text = q.value.trim();
+  if (!text) return;
+  add(text, "me");
+  q.value = "";
+  const typing = add("입력 중…", "ai");
+  setTimeout(() => { typing.textContent = answer(text); log.scrollTop = log.scrollHeight; }, 600);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>러스트 라이브러리</title>
+<style>
+  * { box-sizing: border-box; touch-action: manipulation; }
+  body { margin: 0; font-family: sans-serif; background: #FFF7ED; color: #1c1917; }
+  header { position: sticky; top: 0; background: #7C2D12; color: #fff; padding: 12px 16px; display: flex; gap: 8px; align-items: center; }
+  header a { color: #fff; min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; text-decoration: none; font-size: clamp(14px,2vw,16px); }
+  h1 { font-size: clamp(20px,3vw,32px); margin: 0; flex: 1; }
+  main { padding: 16px; max-width: 900px; margin: 0 auto; }
+  input { width: 100%; min-height: 48px; border: 1px solid #d6d3d1; border-radius: 12px; padding: 0 12px; font-size: clamp(14px,2vw,16px); }
+  .grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-top: 12px; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(3,1fr); } }
+  .card { aspect-ratio: 4/5; background: #fff; border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.12); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .card b { font-size: clamp(14px,2vw,16px); }
+  .card span { font-size: clamp(12px,1.5vw,14px); color: #78716c; }
+  .card button { margin-top: auto; min-height: 48px; border: 0; border-radius: 10px; background: #C2410C; color: #fff; font-size: clamp(14px,2vw,16px); }
+  #detail { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; padding: 16px; }
+  #detail .box { background: #fff; border-radius: 16px; padding: 20px; max-width: 420px; width: 100%; }
+  #detail button { min-height: 48px; width: 100%; margin-top: 12px; border-radius: 10px; border: 1px solid #d6d3d1; font-size: clamp(14px,2vw,16px); }
+</style>
+</head>
+<body>
+<header><a href="/" aria-label="런처로">← 런처</a><h1>러스트 라이브러리</h1></header>
+<main>
+  <input id="q" placeholder="도서 검색 (예: 러스트)" aria-label="도서 검색">
+  <div class="grid" id="grid" role="grid" aria-label="도서 목록"></div>
+</main>
+<div id="detail" role="dialog" aria-label="도서 상세"><div class="box"><h2 id="dTitle"></h2><p id="dDesc"></p><button onclick="closeDetail()">닫기</button></div></div>
+<script>
+const BOOKS = [
+  { t: "러스트 프로그래밍 입문", a: "김러스트", d: "소유권·빌림부터 비동기까지, 처음 배우는 시스템 프로그래밍." },
+  { t: "Tokio 실전 비동기", a: "박토키오", d: "런타임·태스크·채널 패턴으로 만드는 고성능 서버." },
+  { t: " Axum 웹 완벽 가이드", a: "이억섬", d: "미들웨어·추출기·상태공유로 만드는 API 서버." },
+  { t: "안전한 동시성", a: "최페럴", d: "Send/Sync·Arc·Mutex를 이해하는 동시성 교과서." },
+  { t: "WASM과 러스트", a: "정와즘", d: "브라우저와 엣지에서 돌리는 경량 모듈." },
+  { t: "임베디드 러스트", a: "한임베", d: "no_std 환경의 드라이버와 펌웨어." }
+];
+const grid = document.getElementById("grid"), q = document.getElementById("q");
+function render() {
+  const s = q.value.trim();
+  grid.innerHTML = "";
+  BOOKS.filter(b => !s || (b.t + b.a).includes(s)).forEach(b => {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = "<b></b><span></span><button>상세보기</button>";
+    el.querySelector("b").textContent = b.t;
+    el.querySelector("span").textContent = b.a;
+    el.querySelector("button").onclick = () => openDetail(b);
+    grid.appendChild(el);
+  });
+  if (!grid.children.length) grid.innerHTML = "<p>검색 결과가 없습니다.</p>";
+}
+function openDetail(b) {
+  document.getElementById("dTitle").textContent = b.t;
+  document.getElementById("dDesc").textContent = b.a + " — " + b.d;
+  document.getElementById("detail").style.display = "flex";
+}
+function closeDetail() { document.getElementById("detail").style.display = "none"; }
+q.addEventListener("input", render);
+render();
+</script>
+</body>
+</html>
