@@ -102,9 +102,11 @@ async function validateTarget(targetUrl) {
   }
   if (BLOCKED.includes(u.hostname)) return "SSRF";
   if (isLocalHost(u.hostname)) return ALLOW_LOCAL ? null : "SSRF";
-  if (u.protocol !== "https:") return "SSRF";
-  const ok = list.some((d) => u.hostname === d || u.hostname.endsWith("." + d));
-  return ok ? null : "SSRF";
+  const allowed = list.some((d) => u.hostname === d || u.hostname.endsWith("." + d));
+  if (!allowed) return "SSRF";
+  // 허용 목록에 있으면 http도 허용 (내부망 http 서비스 연동용). 단 메타IP는 위에서 차단.
+  if (u.protocol !== "https:" && u.protocol !== "http:") return "SSRF";
+  return null;
 }
 function isAllowedTarget(targetUrl) {
   let u;
@@ -690,7 +692,10 @@ const SettingsSchema = z.object({
   announcement: z.string().max(300).optional(),
   idleTimeoutMin: z.number().int().min(1).max(30).optional(),
   menuOrder: z.array(z.string().max(50)).max(50).optional(),
-  allowedDomains: z.array(z.string().max(100)).max(50).optional(),
+  allowedDomains: z.array(z.string().max(100)).max(50).optional().refine(
+    (v) => !v || !v.some((d) => ["169.254.169.254", "0.0.0.0", "localhost", "127.0.0.1", "::1"].includes(d.trim())),
+    { message: "메타IP·로컬호스트는 허용 목록에 불가" }
+  ),
   backgroundType: z.enum(["color", "image"]).optional(),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   backgroundImage: z.string().max(500).optional().refine(
