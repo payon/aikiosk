@@ -27,19 +27,23 @@ export default function KioskPage() {
   useEffect(() => {
     const id = getDeviceId();
     setUuid(id);
+    const screen = `${window.innerWidth}x${window.innerHeight}`;
     let stop = false;
     const sync = async () => {
       try {
         const reg = await fetch("/api/device/register", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ uuid: id })
+          body: JSON.stringify({ uuid: id, screen })
         }).then((r) => r.json());
         if (!reg.success || stop) return;
         setCode(reg.data.code);
         const st = await fetch(`/api/device/status?uuid=${encodeURIComponent(id)}`).then((r) => r.json());
         if (!st.success || stop) return;
         setStatus(st.data.status);
-        const target = (st.data.assignedSlug || "").trim() || "all";
+        await fetch("/api/device/heartbeat", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uuid: id, screen: `${window.innerWidth}x${window.innerHeight}` })
+        }).catch(() => {});
         if (st.data.status === "approved") {
           const target = st.data.assignedSlug || "all";
           if (target === "all") {

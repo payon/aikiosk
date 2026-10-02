@@ -105,6 +105,9 @@ model Device {
   code         String
   status       String   @default("pending")
   assignedSlug String   @default("")
+  screen       String   @default("")
+  placement    String   @default("")
+  storagePct   Int      @default(-1)
   lastSeen     DateTime @default(now())
   createdAt    DateTime @default(now())
 

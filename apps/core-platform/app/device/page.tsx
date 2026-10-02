@@ -44,7 +44,7 @@ export default function DevicePage() {
         if (s.success) setStatus(s.data.status);
         await fetch("/api/device/heartbeat", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ uuid: id })
+          body: JSON.stringify({ uuid: id, screen: `${window.innerWidth}x${window.innerHeight}` })
         }).catch(() => {});
       } catch { /* ignore */ }
     }, 30000);

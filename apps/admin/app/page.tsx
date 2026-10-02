@@ -20,7 +20,7 @@ interface AuditRow { id: string; actorId: string; action: string; target?: strin
 interface Perm { email: string; slug: string; accessLevel: string; }
 interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
-interface Device { id: string; uuid: string; name: string; code: string; status: string; lastSeen: string; createdAt: string; }
+interface Device { id: string; uuid: string; name: string; code: string; status: string; lastSeen: string; createdAt: string; assignedSlug?: string; screen?: string; placement?: string; storagePct?: number; }
 
 const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct"; bgType: string; bgColor: string; bgImage: string } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed", bgType: "color", bgColor: "#FFFFFF", bgImage: "" };
 
@@ -232,7 +232,7 @@ export default function Dashboard() {
     if (ok) load();
   }
 
-  async function setDevice(uuid: string, data: { status?: string; name?: string; assignedSlug?: string }, done = "장비 상태 변경됨") {
+  async function setDevice(uuid: string, data: { status?: string; name?: string; assignedSlug?: string; placement?: string }, done = "장비 상태 변경됨") {
     const { ok, j } = await api("/api/admin/devices", {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ uuid, ...data })
     });
@@ -555,33 +555,81 @@ export default function Dashboard() {
         {tab === "devices" && (
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">장비 관리</h1>
-            <p className="text-[clamp(14px,2vw,16px)] text-gray-600 mb-3">키오스크 PWA 첫 실행 시 발급된 인증 코드를 확인하고 승인하세요. 승인된 장비만 정식 운영 대상으로 집계됩니다.</p>
-            <ul className="grid gap-2">
-              {devices.map((d) => (
-                <li key={d.id} className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-2 text-[clamp(14px,2vw,16px)]">
-                  <span className="flex-1 min-w-[200px]">
-                    <b>{d.name}</b> · 코드 <b className="tracking-widest">{d.code}</b> · {d.status === "approved" ? "승인됨" : d.status === "rejected" ? "거부됨" : "대기"}
-                    <span className="block text-[clamp(11px,1.5vw,13px)] text-gray-500 font-mono break-all">{d.uuid}</span>
-                  </span>
-                  <select className={input} value={(d as Device & { assignedSlug?: string }).assignedSlug || ""} 
-                    onChange={(e) => setDevice(d.uuid, { assignedSlug: e.target.value }, "표시 화면 지정됨")}
-                    aria-label={`${d.name} 표시 화면`}>
-                    <option value="">화면 미지정 (코드 화면)</option>
-                    <option value="all">전체 앱 (런처 그리드)</option>
-                    <optgroup label="카테고리">
-                      {cats.map((c) => <option key={c} value={`cat:${c}`}>{c} 전체</option>)}
-                    </optgroup>
-                    <optgroup label="개별 앱">
-                      {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name} ({a.slug})</option>)}
-                    </optgroup>
-                  </select>
-                  <button className={btn} onClick={() => setDevice(d.uuid, { status: "approved" }, "장비 승인됨")}>승인</button>
-                  <button className={btn} onClick={() => setDevice(d.uuid, { status: "rejected" }, "장비 거부됨")}>거부</button>
-                  <button className={btn} onClick={() => removeDevice(d.uuid)}>삭제</button>
-                </li>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[["전체", devices.length],
+                ["승인 대기", devices.filter((d) => d.status === "pending").length],
+                ["온라인", devices.filter((d) => Date.now() - new Date(d.lastSeen).getTime() < 5 * 60 * 1000).length]
+              ].map(([k, v]) => (
+                <div key={k as string} className="bg-white border rounded-2xl p-4">
+                  <b className="block text-[clamp(24px,3vw,36px)]">{v}</b>
+                  <span className="text-[clamp(12px,1.5vw,14px)] text-gray-500">{k} (5분 heartbeat)</span>
+                </div>
               ))}
-              {devices.length === 0 && <li className="text-gray-500">등록된 장비 없음 — 런처 /device 화면을 열면 여기 표시됩니다</li>}
-            </ul>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const fd = new FormData(e.target as HTMLFormElement);
+              const { ok, j } = await api("/api/admin/devices", {
+                method: "POST", headers: { "content-type": "application/json" },
+                body: JSON.stringify({ name: String(fd.get("name") || "미지정 장비"), placement: String(fd.get("placement") || "") })
+              });
+              result(ok, `장비 사전등록됨 (코드 ${j.data?.code ?? ""})`, j);
+              if (ok) { (e.target as HTMLFormElement).reset(); load(); }
+            }} className="flex flex-wrap gap-2 max-w-2xl bg-white border rounded-2xl p-4 mb-4">
+              <input name="name" className={`${input} flex-1 min-w-[140px]`} placeholder="장비 이름" aria-label="새 장비 이름" />
+              <input name="placement" className={`${input} flex-1 min-w-[140px]`} placeholder="배치 (시·구·센터)" aria-label="새 장비 배치" />
+              <button className={primary}>사전 등록</button>
+            </form>
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] bg-white border rounded-2xl text-[clamp(12px,1.5vw,14px)]">
+              <thead>
+                <tr className="border-b text-left text-gray-500">
+                  <th className="p-2">장비 UUID</th><th className="p-2">화면</th><th className="p-2">상태</th>
+                  <th className="p-2">등록 코드</th><th className="p-2">배치</th><th className="p-2">배정 화면</th>
+                  <th className="p-2">heartbeat</th><th className="p-2">저장소</th><th className="p-2">관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {devices.map((d) => (
+                  <tr key={d.id} className="border-b align-top">
+                    <td className="p-2"><b>{d.name}</b><span className="block font-mono text-[11px] text-gray-500 break-all">{d.uuid.slice(0, 13)}…</span></td>
+                    <td className="p-2 whitespace-nowrap">{d.screen || "-"}</td>
+                    <td className="p-2 whitespace-nowrap">{d.status === "approved" ? "승인됨" : d.status === "rejected" ? "거부됨" : "대기"}</td>
+                    <td className="p-2 font-mono font-bold tracking-widest">{d.code}</td>
+                    <td className="p-2">
+                      <input className="min-h-[48px] border rounded-lg px-2 w-28" defaultValue={d.placement || ""} id={`pl-${d.id}`} aria-label={`${d.name} 배치`} />
+                      <button className={btn} onClick={() => {
+                        const v = (document.getElementById(`pl-${d.id}`) as HTMLInputElement).value;
+                        setDevice(d.uuid, { placement: v }, "배치 저장됨");
+                      }}>저장</button>
+                    </td>
+                    <td className="p-2">
+                      <select className="min-h-[48px] border rounded-lg px-2 max-w-[140px]" value={(d as Device & { assignedSlug?: string }).assignedSlug || ""}
+                        onChange={(e) => setDevice(d.uuid, { assignedSlug: e.target.value }, "표시 화면 지정됨")}
+                        aria-label={`${d.name} 표시 화면`}>
+                        <option value="">미지정</option>
+                        <option value="all">전체 앱</option>
+                        <optgroup label="카테고리">
+                          {cats.map((c) => <option key={c} value={`cat:${c}`}>{c} 전체</option>)}
+                        </optgroup>
+                        <optgroup label="개별 앱">
+                          {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name}</option>)}
+                        </optgroup>
+                      </select>
+                    </td>
+                    <td className="p-2 whitespace-nowrap text-gray-500">{d.lastSeen ? new Date(d.lastSeen).toLocaleString("ko-KR") : "-"}</td>
+                    <td className="p-2">{d.storagePct !== undefined && d.storagePct >= 0 ? `${d.storagePct}%` : "-"}</td>
+                    <td className="p-2 whitespace-nowrap">
+                      <button className={btn} onClick={() => setDevice(d.uuid, { status: "approved" }, "장비 승인됨")}>승인</button>
+                      <button className={btn} onClick={() => setDevice(d.uuid, { status: "rejected" }, "장비 거부됨")}>거부</button>
+                      <button className={btn} onClick={() => removeDevice(d.uuid)}>삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {devices.length === 0 && <p className="text-gray-500 mt-2">등록된 장비 없음 — 런처 /device·/kiosk 화면을 열면 여기 표시됩니다</p>}
+            </div>
           </section>
         )}
 

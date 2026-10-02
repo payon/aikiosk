@@ -717,26 +717,29 @@ app.post("/api/device/register", async (req, res) => {
   const parsed = z.object({
     uuid: z.string().min(8).max(100),
     name: z.string().max(100).optional(),
-    info: z.string().max(300).optional()
+    info: z.string().max(300).optional(),
+    screen: z.string().max(20).optional(),
+    placement: z.string().max(100).optional()
   }).safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (prisma) {
     try {
       const row = await prisma.device.upsert({
         where: { uuid: parsed.data.uuid },
-        update: { name: parsed.data.name, lastSeen: new Date() },
-        create: { uuid: parsed.data.uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", lastSeen: new Date() }
+        update: { name: parsed.data.name, screen: parsed.data.screen, lastSeen: new Date() },
+        create: { uuid: parsed.data.uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", screen: parsed.data.screen || "", placement: parsed.data.placement || "", lastSeen: new Date() }
       });
       return ok(res, { code: row.code, status: row.status });
     } catch { /* fallthrough */ }
   }
   let d = devicesMem.find((x) => x.uuid === parsed.data.uuid);
   if (!d) {
-    d = { id: `d-${Date.now()}`, uuid: parsed.data.uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", lastSeen: new Date().toISOString(), createdAt: new Date().toISOString() };
+    d = { id: `d-${Date.now()}`, uuid: parsed.data.uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", screen: parsed.data.screen || "", placement: parsed.data.placement || "", storagePct: -1, lastSeen: new Date().toISOString(), createdAt: new Date().toISOString() };
     devicesMem.push(d);
   } else {
     d.lastSeen = new Date().toISOString();
     if (parsed.data.name) d.name = parsed.data.name;
+    if (parsed.data.screen) d.screen = parsed.data.screen;
   }
   persist();
   return ok(res, { code: d.code, status: d.status });
@@ -757,18 +760,31 @@ app.get("/api/device/status", async (req, res) => {
   return ok(res, { status: d.status, code: d.code, assignedSlug: d.assignedSlug || "" });
 });
 
-// POST /api/device/heartbeat {uuid}
+// POST /api/device/heartbeat {uuid, screen?, storagePct?}
 app.post("/api/device/heartbeat", async (req, res) => {
-  const uuid = String((req.body || {}).uuid || "");
-  if (!uuid) return fail(res, "VALIDATION", "uuid required", 400);
+  const parsed = z.object({
+    uuid: z.string().min(1).max(100),
+    screen: z.string().max(20).optional(),
+    storagePct: z.number().int().min(0).max(100).optional()
+  }).safeParse(req.body || {});
+  if (!parsed.success) return fail(res, "VALIDATION", "uuid required", 400);
+  const { uuid, screen, storagePct } = parsed.data;
   if (prisma) {
     try {
-      await prisma.device.update({ where: { uuid }, data: { lastSeen: new Date() } });
+      const data = { lastSeen: new Date() };
+      if (screen) data.screen = screen;
+      if (storagePct !== undefined) data.storagePct = storagePct;
+      await prisma.device.update({ where: { uuid }, data });
       return ok(res, null);
     } catch { /* fallthrough */ }
   }
   const d = devicesMem.find((x) => x.uuid === uuid);
-  if (d) { d.lastSeen = new Date().toISOString(); persist(); }
+  if (d) {
+    d.lastSeen = new Date().toISOString();
+    if (screen) d.screen = screen;
+    if (storagePct !== undefined) d.storagePct = storagePct;
+    persist();
+  }
   return ok(res, null);
 });
 
@@ -788,7 +804,9 @@ app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
     uuid: z.string().min(1),
     status: z.enum(["pending", "approved", "rejected"]).optional(),
     name: z.string().max(100).optional(),
-    assignedSlug: z.string().max(50).optional()
+    assignedSlug: z.string().max(50).optional(),
+    placement: z.string().max(100).optional(),
+    screen: z.string().max(20).optional()
   }).safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (prisma) {
@@ -797,6 +815,8 @@ app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
       if (parsed.data.status) data.status = parsed.data.status;
       if (parsed.data.name !== undefined) data.name = parsed.data.name;
       if (parsed.data.assignedSlug !== undefined) data.assignedSlug = parsed.data.assignedSlug;
+      if (parsed.data.placement !== undefined) data.placement = parsed.data.placement;
+      if (parsed.data.screen !== undefined) data.screen = parsed.data.screen;
       const row = await prisma.device.update({ where: { uuid: parsed.data.uuid }, data });
       await audit(req.claims.userId, "device.update", parsed.data.uuid, "success");
       return ok(res, row);
@@ -809,13 +829,42 @@ app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
   if (parsed.data.status) d.status = parsed.data.status;
   if (parsed.data.name !== undefined) d.name = parsed.data.name;
   if (parsed.data.assignedSlug !== undefined) d.assignedSlug = parsed.data.assignedSlug;
+  if (parsed.data.placement !== undefined) d.placement = parsed.data.placement;
+  if (parsed.data.screen !== undefined) d.screen = parsed.data.screen;
   persist();
   await audit(req.claims.userId, "device.update", d.uuid, "success");
   return ok(res, d);
 });
 
-app.delete("/api/admin/devices", requireAdmin, async (req, res) => {
-  const { uuid } = req.query;
+// POST /api/admin/devices {uuid?, name?, placement?} — 사전 등록(수동 생성)
+app.post("/api/admin/devices", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    uuid: z.string().min(8).max(100).optional(),
+    name: z.string().max(100).optional(),
+    placement: z.string().max(100).optional()
+  }).safeParse(req.body || {});
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const uuid = parsed.data.uuid || `rk-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  if (prisma) {
+    try {
+      const row = await prisma.device.create({
+        data: { uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", placement: parsed.data.placement || "" }
+      });
+      await audit(req.claims.userId, "device.create", uuid, "success");
+      return ok(res, row, 201);
+    } catch {
+      return fail(res, "CONFLICT", "UUID 중복", 409);
+    }
+  }
+  if (devicesMem.some((x) => x.uuid === uuid)) return fail(res, "CONFLICT", "UUID 중복", 409);
+  const row = { id: `d-${Date.now()}`, uuid, name: parsed.data.name || "미지정 장비", code: deviceCode(), status: "pending", screen: "", placement: parsed.data.placement || "", storagePct: -1, assignedSlug: "", lastSeen: new Date(0).toISOString(), createdAt: new Date().toISOString() };
+  devicesMem.push(row);
+  persist();
+  await audit(req.claims.userId, "device.create", uuid, "success");
+  return ok(res, row, 201);
+});
+
+app.delete("/api/admin/devices", requireAdmin, async (req, res) => {  const { uuid } = req.query;
   if (!uuid) return fail(res, "VALIDATION", "uuid required", 400);
   if (prisma) {
     try {
