@@ -338,9 +338,13 @@ export default function Dashboard() {
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">앱 관리</h1>
             <form onSubmit={create} className="grid gap-2 max-w-lg mb-6 bg-white border rounded-2xl p-4">
-              {(["name", "slug", "targetUrl", "iconUrl", "description", "category"] as const).map((k) => (
+              {(["name", "slug", "targetUrl", "iconUrl", "description"] as const).map((k) => (
                 <input key={k} className={input} placeholder={k} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
               ))}
+              <input className={input} placeholder="category (목록에서 선택 또는 직접 입력)" list="cat-list-new" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+              <datalist id="cat-list-new">
+                {cats.map((c) => <option key={c} value={c} />)}
+              </datalist>
               <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">아이콘 업로드 (png/jpg/webp/svg, 1.5MB 이하)
                 <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
                   disabled={uploading}
@@ -379,9 +383,13 @@ export default function Dashboard() {
                 <div className="absolute inset-0 bg-black/40" onClick={() => setEditing(null)} />
                 <form onSubmit={saveEdit} className="relative bg-white rounded-2xl p-4 grid gap-2 w-full max-w-lg">
                   <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold">앱 수정</h2>
-                  {(["name", "slug", "targetUrl", "iconUrl", "description", "category"] as const).map((k) => (
+                  {(["name", "slug", "targetUrl", "iconUrl", "description"] as const).map((k) => (
                     <input key={k} className={input} placeholder={k} value={editing[k] ?? ""} onChange={(e) => setEditing({ ...editing, [k]: e.target.value })} />
                   ))}
+                  <input className={input} placeholder="category (목록에서 선택 또는 직접 입력)" list="cat-list" value={editing.category || "전체"} onChange={(e) => setEditing({ ...editing, category: e.target.value })} />
+                  <datalist id="cat-list">
+                    {cats.map((c) => <option key={c} value={c} />)}
+                  </datalist>
                   <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">아이콘 업로드
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
                       disabled={uploading}
