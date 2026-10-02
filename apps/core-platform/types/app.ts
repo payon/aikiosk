@@ -9,6 +9,7 @@ export interface AppRegistry {
   category?: string;
   stripPrefix?: boolean;
   openMode?: "embed" | "direct";
+  openTarget?: "self" | "blank";
   bgType?: string;
   bgColor?: string;
   bgImage?: string;
@@ -19,6 +20,7 @@ export interface ShellLayoutProps {
   apps: AppRegistry[];
   currentSlug?: string;
   brand?: string;
+  logo?: string;
   idleMin?: number;
   bodyStyle?: import("react").CSSProperties;
   children: React.ReactNode;

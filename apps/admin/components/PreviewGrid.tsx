@@ -13,6 +13,7 @@ export interface AppRegistry {
   category?: string;
   stripPrefix?: boolean;
   openMode?: "embed" | "direct";
+  openTarget?: "self" | "blank";
   bgType?: string;
   bgColor?: string;
   bgImage?: string;

@@ -31,6 +31,7 @@ model Application {
   category     String?
   stripPrefix  Boolean                @default(false)
   openMode     String                 @default("embed")
+  openTarget   String                 @default("self")
   bgType       String                 @default("color")
   bgColor      String                 @default("#FFFFFF")
   bgImage      String                 @default("")
@@ -70,6 +71,8 @@ model PlatformSetting {
   gridDensity   String   @default("comfortable")
   gridCols      Json?
   showAppName   Boolean  @default(true)
+  pwaIconUrl    String   @default("")
+  adminMenu     Json?
   updatedAt      DateTime @updatedAt
 }
 

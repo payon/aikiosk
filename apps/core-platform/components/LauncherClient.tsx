@@ -77,8 +77,11 @@ export function LauncherClient({ initialApps, initialCats, announcement, grid }:
           config={grid}
           onAppClick={(slug) => {
             const app = filtered.find((a) => a.slug === slug);
-            if (app?.openMode === "direct") window.location.href = app.targetUrl;
-            else router.push(`/apps/${slug}`);
+            if (app?.openMode === "direct") {
+              // 새 탭: 런처 유지. 같은 탭: 히스토리에 남아 뒤로가기로 복귀.
+              if (app.openTarget === "blank") window.open(app.targetUrl, "_blank", "noopener");
+              else window.location.href = app.targetUrl;
+            } else router.push(`/apps/${slug}`);
           }}
         />
       )}

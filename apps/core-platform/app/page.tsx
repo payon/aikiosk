@@ -19,6 +19,8 @@ async function get<T>(path: string, fallback: T): Promise<T> {
 
 interface Platform {
   platformName: string;
+  logoUrl: string;
+  pwaIconUrl: string;
   announcement: string;
   idleTimeoutMin: number;
   backgroundType: string;
@@ -35,7 +37,7 @@ export default async function LauncherPage() {
     get<AppRegistry[]>("/api/apps", []),
     get<{ name: string; count: number }[]>("/api/categories", []),
     get<Platform>("/api/platform", {
-      platformName: "RustKorea Hub", announcement: "", idleTimeoutMin: 3,
+      platformName: "RustKorea Hub", logoUrl: "/logo.svg", pwaIconUrl: "", announcement: "", idleTimeoutMin: 3,
       backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "",
       gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 },
       showAppName: true
@@ -46,7 +48,7 @@ export default async function LauncherPage() {
       ? { backgroundColor: platform.backgroundColor || "#FFF7ED", backgroundImage: `url(${platform.backgroundImage})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }
       : { backgroundColor: platform.backgroundColor || "#FFF7ED" };
   return (
-    <Shell apps={apps} brand={platform.platformName} idleMin={platform.idleTimeoutMin} bodyStyle={bodyStyle}>
+    <Shell apps={apps} brand={platform.platformName} logo={platform.logoUrl} idleMin={platform.idleTimeoutMin} bodyStyle={bodyStyle}>
       <LauncherClient
         initialApps={apps}
         initialCats={cats}

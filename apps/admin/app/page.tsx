@@ -4,11 +4,21 @@ import { useRouter } from "next/navigation";
 import { PreviewGrid, type AppRegistry } from "@/components/PreviewGrid";
 
 const LAUNCHER = process.env.NEXT_PUBLIC_LAUNCHER_URL || "/";
-type Tab = "overview" | "apps" | "categories" | "users" | "permissions" | "settings" | "audit";
+type Tab = string;
+
+const DEFAULT_MENU = [
+  { id: "overview", label: "대시보드" },
+  { id: "categories", label: "카테고리 관리" },
+  { id: "apps", label: "앱 관리" },
+  { id: "users", label: "사용자" },
+  { id: "permissions", label: "권한" },
+  { id: "settings", label: "설정" },
+  { id: "audit", label: "감사 로그" }
+];
 
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
-interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; }
+interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
 
 const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct"; bgType: string; bgColor: string; bgImage: string } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed", bgType: "color", bgColor: "#FFFFFF", bgImage: "" };
@@ -19,7 +29,7 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRegistry[]>([]);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true });
+  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true, pwaIconUrl: "", adminMenu: [] });
   const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
@@ -101,7 +111,9 @@ export default function Dashboard() {
         allowedDomains: j.data.allowedDomains ?? [],
         gridDensity: j.data.gridDensity ?? "comfortable",
         gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(j.data.gridCols || {}) },
-        showAppName: j.data.showAppName !== false
+        showAppName: j.data.showAppName !== false,
+        pwaIconUrl: j.data.pwaIconUrl ?? "",
+        adminMenu: Array.isArray(j.data.adminMenu) && j.data.adminMenu.length ? j.data.adminMenu : []
       });
     }).catch(() => {});
     fetch("/api/admin/users").then(async (r) => {
@@ -150,7 +162,7 @@ export default function Dashboard() {
     const slug = normSlug(editing.slug);
     const { ok, j } = await api("/api/admin/apps", {
       method: "PATCH", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: editing.id, name: editing.name, slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "", links: (editing.links || []).filter((l) => l.label.trim() && l.url.trim()) })
+      body: JSON.stringify({ id: editing.id, name: editing.name, slug, targetUrl: editing.targetUrl, iconUrl: editing.iconUrl, description: editing.description, category: editing.category, stripPrefix: !!editing.stripPrefix, openMode: editing.openMode || "embed", openTarget: editing.openTarget || "self", bgType: editing.bgType || "color", bgColor: editing.bgColor || "#FFFFFF", bgImage: editing.bgImage || "", links: (editing.links || []).filter((l) => l.label.trim() && l.url.trim()) })
     });
     result(ok, "수정됨 → 런처에 즉시 반영", j);
     if (ok) { setEditing(null); load(); }
@@ -266,17 +278,9 @@ export default function Dashboard() {
   const input = "min-h-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const btn = "min-h-[48px] min-w-[48px] border rounded-lg px-3 text-[clamp(14px,2vw,16px)] bg-white";
   const primary = "min-h-[48px] rounded-lg bg-gray-900 text-white px-4 text-[clamp(16px,2vw,24px)]";
-  const mainTabs: { id: Tab; label: string }[] = [
-    { id: "overview", label: "개요" },
-    { id: "apps", label: "앱 관리" },
-    { id: "categories", label: "카테고리" }
-  ];
-  const moreTabs: { id: Tab; label: string }[] = [
-    { id: "users", label: "사용자" },
-    { id: "permissions", label: "권한" },
-    { id: "settings", label: "설정" },
-    { id: "audit", label: "감사 로그" }
-  ];
+  const menu = settings.adminMenu.length ? settings.adminMenu : DEFAULT_MENU;
+  const mainTabs: { id: string; label: string }[] = menu.slice(0, 3);
+  const moreTabs: { id: string; label: string }[] = menu.slice(3);
   const tabs = [...mainTabs, ...moreTabs];
 
   return (
@@ -445,6 +449,12 @@ export default function Dashboard() {
                     <select className={input} value={editing.openMode || "embed"} onChange={(e) => setEditing({ ...editing, openMode: e.target.value as "embed" | "direct" })} aria-label="열기 방식">
                       <option value="embed">통합 보기 (/apps/슬러그)</option>
                       <option value="direct">직접 이동 (targetUrl로 이동)</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">외부 앱 열기 (복귀 방식)
+                    <select className={input} value={editing.openTarget || "self"} onChange={(e) => setEditing({ ...editing, openTarget: e.target.value as "self" | "blank" })} aria-label="외부 앱 열기">
+                      <option value="self">같은 탭 (뒤로가기로 런처 복귀)</option>
+                      <option value="blank">새 탭 (런처 유지)</option>
                     </select>
                   </label>
                   <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">카드 배경
@@ -650,6 +660,66 @@ export default function Dashboard() {
                 앱 이름 표시
               </label>
               <button className={primary} onClick={() => saveSettings({ gridDensity: settings.gridDensity, gridCols: settings.gridCols, showAppName: settings.showAppName })}>그리드 저장 → 런처에 반영</button>
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">로고·PWA 아이콘</h2>
+            <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4 grid gap-2">
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">헤더 로고 URL
+                <input className={`${input} w-full`} value={settings.logoUrl} onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })} />
+              </label>
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">로고 이미지 업로드
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
+                  disabled={uploading}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const url = await uploadIcon(f);
+                    if (url) { setSettings((s) => ({ ...s, logoUrl: url })); saveSettings({ logoUrl: url }, "로고 저장됨 → 런처 헤더에 반영"); }
+                    e.target.value = "";
+                  }} />
+              </label>
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">PWA 아이콘 (홈화면 설치용)
+                <span className="flex gap-2 items-center">
+                  {settings.pwaIconUrl && <img src={settings.pwaIconUrl} alt="PWA 아이콘 미리보기" width={48} height={48} className="w-12 h-12 object-contain border rounded-lg" />}
+                  <input className={`${input} flex-1`} placeholder="/uploads/pwa.png" value={settings.pwaIconUrl} onChange={(e) => setSettings({ ...settings, pwaIconUrl: e.target.value })} aria-label="PWA 아이콘 URL" />
+                </span>
+              </label>
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">PWA 아이콘 업로드 (png 권장)
+                <input type="file" accept="image/png,image/jpeg,image/webp" className={`${input} pt-2`}
+                  disabled={uploading}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const url = await uploadIcon(f);
+                    if (url) { setSettings((s) => ({ ...s, pwaIconUrl: url })); saveSettings({ pwaIconUrl: url }, "PWA 아이콘 저장됨"); }
+                    e.target.value = "";
+                  }} />
+              </label>
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">관리자 메뉴 관리 (이름·순서)</h2>
+            <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4 grid gap-2">
+              {(settings.adminMenu.length ? settings.adminMenu : DEFAULT_MENU).map((m, i, arr) => (
+                <div key={m.id} className="flex items-center gap-1">
+                  <input className={`${input} flex-1`} value={m.label}
+                    onChange={(e) => {
+                      const next = arr.map((x, j) => j === i ? { ...x, label: e.target.value } : x);
+                      setSettings((s) => ({ ...s, adminMenu: next }));
+                    }} aria-label={`${m.id} 메뉴명`} />
+                  <button className={btn} onClick={() => {
+                    if (i === 0) return;
+                    const next = [...arr]; [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                    saveSettings({ adminMenu: next }, "메뉴 순서 저장됨");
+                  }} aria-label="위로">↑</button>
+                  <button className={btn} onClick={() => {
+                    if (i === arr.length - 1) return;
+                    const next = [...arr]; [next[i + 1], next[i]] = [next[i], next[i + 1]];
+                    saveSettings({ adminMenu: next }, "메뉴 순서 저장됨");
+                  }} aria-label="아래로">↓</button>
+                </div>
+              ))}
+              <button className={primary} onClick={() => {
+                const next = (settings.adminMenu.length ? settings.adminMenu : DEFAULT_MENU).map((m) => ({ ...m }));
+                saveSettings({ adminMenu: next }, "메뉴 이름 저장됨");
+              }}>메뉴 이름 저장</button>
             </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">허용 도메인 (앱 등록 Allowlist)</h2>
             <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4">

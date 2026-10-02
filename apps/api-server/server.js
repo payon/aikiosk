@@ -140,13 +140,23 @@ let store = [
 // 인메모리 권한 (DB 없을 때 CRUD 시연용). seed-admin은 전체, demo-user는 library만.
 let permMem = [{ email: "user@rustkorea.cloud", slug: "library", accessLevel: "VIEW" }];
 let auditMem = [];
+const DEFAULT_ADMIN_MENU = [
+  { id: "overview", label: "대시보드" },
+  { id: "categories", label: "카테고리 관리" },
+  { id: "apps", label: "앱 관리" },
+  { id: "users", label: "사용자" },
+  { id: "permissions", label: "권한" },
+  { id: "settings", label: "설정" },
+  { id: "audit", label: "감사 로그" }
+];
 let settingsMem = {
   platformDomain: DOMAIN, platformName: "러스트코리아", primaryColor: "#C2410C",
   logoUrl: "/logo.svg", allowedDomains: [DOMAIN],
   announcement: "", idleTimeoutMin: 3, menuOrder: [],
   backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "",
   gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 },
-  showAppName: true
+  showAppName: true, pwaIconUrl: "",
+  adminMenu: DEFAULT_ADMIN_MENU
 };
 // 인메모리 사용자 (DB 없을 때 CRUD 시연용, 비밀번호 bcrypt 해시)
 const bcryptSync = require("bcryptjs");
@@ -211,7 +221,9 @@ function publicSettings(s) {
     backgroundImage: s.backgroundImage || "",
     gridDensity: s.gridDensity || "comfortable",
     gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(s.gridCols || {}) },
-    showAppName: s.showAppName !== false
+    showAppName: s.showAppName !== false,
+    pwaIconUrl: s.pwaIconUrl || "",
+    adminMenu: Array.isArray(s.adminMenu) && s.adminMenu.length ? s.adminMenu : DEFAULT_ADMIN_MENU
   };
 }
 async function audit(actorId, action, target, result) {
@@ -261,6 +273,7 @@ const AppCreateSchema = z.object({
   category: z.string().max(50).default("전체"),
   stripPrefix: z.boolean().default(false), // true: 상대가 basePath 없이 루트 서빙 → /apps/<slug> 제거하고 그대로 전달
   openMode: z.enum(["embed", "direct"]).default("embed"), // embed: /apps/<slug> 통합 보기, direct: targetUrl로 직접 이동
+  openTarget: z.enum(["self", "blank"]).default("self"), // self: 같은 탭(뒤로가기 복귀), blank: 새 탭(런처 유지)
   bgType: z.enum(["color", "image", "none"]).default("color"),
   bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#FFFFFF"),
   bgImage: z.string().max(500).default("").refine(
@@ -280,6 +293,7 @@ const AppPatchSchema = z.object({
   category: z.string().max(50).optional(),
   stripPrefix: z.boolean().optional(),
   openMode: z.enum(["embed", "direct"]).optional(),
+  openTarget: z.enum(["self", "blank"]).optional(),
   bgType: z.enum(["color", "image", "none"]).optional(),
   bgColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   bgImage: z.string().max(500).optional().refine(
@@ -782,6 +796,8 @@ const SettingsSchema = z.object({
   gridDensity: z.enum(["comfortable", "compact"]).optional(),
   gridCols: GridColsSchema.partial().optional(),
   showAppName: z.boolean().optional(),
+  pwaIconUrl: z.string().max(500).optional(),
+  adminMenu: z.array(z.object({ id: z.string().min(1).max(30), label: z.string().min(1).max(30) })).max(20).optional(),
   allowedDomains: z.array(z.string().max(100)).max(50).optional().refine(
     (v) => !v || !v.some((d) => ["169.254.169.254", "0.0.0.0", "localhost", "127.0.0.1", "::1"].includes(d.trim())),
     { message: "메타IP·로컬호스트는 허용 목록에 불가" }
