@@ -1,0 +1,6 @@
+# 개발 전환용: 호스트 data/uploads를 그대로 물려서 등록 앱·아이콘 유실 방지
+services:
+  backend:
+    volumes:
+      - ./apps/api-server/data:/srv/app/data
+      - ./apps/api-server/uploads:/srv/app/uploads

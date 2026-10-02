@@ -16,7 +16,13 @@ services:
     restart: unless-stopped
 
   launcher:
-    build: ./apps/core-platform
+    build:
+      context: ./apps/core-platform
+      args:
+        API_INTERNAL_URL: http://backend:4501
+        ADMIN_INTERNAL_URL: http://admin:4502
+        NEXT_PUBLIC_PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-rustkorea.cloud}
+        NEXT_PUBLIC_ADMIN_URL: /admin
     environment:
       PORT: "4500"
       NODE_ENV: production
@@ -31,7 +37,11 @@ services:
     restart: unless-stopped
 
   admin:
-    build: ./apps/admin
+    build:
+      context: ./apps/admin
+      args:
+        API_INTERNAL_URL: http://backend:4501
+        NEXT_PUBLIC_LAUNCHER_URL: /
     environment:
       PORT: "4502"
       NODE_ENV: production

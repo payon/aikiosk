@@ -2,6 +2,7 @@
 FROM node:20-slim AS base
 WORKDIR /srv/app
 COPY package*.json ./
+COPY prisma ./prisma
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY . .
 RUN npx prisma generate
