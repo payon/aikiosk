@@ -39,17 +39,26 @@ export default function KioskPage() {
         const st = await fetch(`/api/device/status?uuid=${encodeURIComponent(id)}`).then((r) => r.json());
         if (!st.success || stop) return;
         setStatus(st.data.status);
-        const slug = st.data.assignedSlug || "";
-        if (st.data.status === "approved" && slug) {
+        const target = (st.data.assignedSlug || "").trim() || "all";
+        if (st.data.status === "approved") {
+          const target = st.data.assignedSlug || "all";
+          if (target === "all") {
+            router.replace("/");
+            return;
+          }
+          if (target.startsWith("cat:")) {
+            router.replace(`/?cat=${encodeURIComponent(target.slice(4))}`);
+            return;
+          }
           const apps = await fetch("/api/apps").then((r) => r.json()).catch(() => null);
-          const app = apps?.success ? apps.data.find((a: { slug: string }) => a.slug === slug) : null;
+          const app = apps?.success ? apps.data.find((a: { slug: string }) => a.slug === target) : null;
           if (!app) {
             setAppName("지정된 앱을 찾을 수 없습니다. 관리자에게 문의하세요.");
             return;
           }
           setAppName(app.name);
           if (app.openMode === "direct") window.location.href = app.targetUrl;
-          else router.replace(`/apps/${slug}`);
+          else router.replace(`/apps/${target}`);
           return;
         }
       } catch { /* 다음 폴링 */ }

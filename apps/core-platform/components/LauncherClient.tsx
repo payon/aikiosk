@@ -9,14 +9,15 @@ interface Props {
   initialCats: { name: string; count: number }[];
   announcement: string;
   grid: GridConfig;
+  initialCat?: string;
 }
 
-export function LauncherClient({ initialApps, initialCats, announcement, grid }: Props) {
+export function LauncherClient({ initialApps, initialCats, announcement, grid, initialCat }: Props) {
   const router = useRouter();
   const [apps, setApps] = useState(initialApps);
   const [cats, setCats] = useState(initialCats);
   const [announcementLive, setAnnouncement] = useState(announcement);
-  const [cat, setCat] = useState("전체");
+  const [cat, setCat] = useState(initialCat && initialCat !== "전체" ? initialCat : "전체");
   const [q, setQ] = useState("");
 
   // 어드민 변경 즉시 반영: 플랫폼 설정 3초, 앱/카테고리 10초 폴링 (화면 가림 시 중단)

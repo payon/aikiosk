@@ -566,8 +566,14 @@ export default function Dashboard() {
                   <select className={input} value={(d as Device & { assignedSlug?: string }).assignedSlug || ""} 
                     onChange={(e) => setDevice(d.uuid, { assignedSlug: e.target.value }, "표시 화면 지정됨")}
                     aria-label={`${d.name} 표시 화면`}>
-                    <option value="">화면 미지정</option>
-                    {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name} ({a.slug})</option>)}
+                    <option value="">화면 미지정 (코드 화면)</option>
+                    <option value="all">전체 앱 (런처 그리드)</option>
+                    <optgroup label="카테고리">
+                      {cats.map((c) => <option key={c} value={`cat:${c}`}>{c} 전체</option>)}
+                    </optgroup>
+                    <optgroup label="개별 앱">
+                      {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name} ({a.slug})</option>)}
+                    </optgroup>
                   </select>
                   <button className={btn} onClick={() => setDevice(d.uuid, { status: "approved" }, "장비 승인됨")}>승인</button>
                   <button className={btn} onClick={() => setDevice(d.uuid, { status: "rejected" }, "장비 거부됨")}>거부</button>

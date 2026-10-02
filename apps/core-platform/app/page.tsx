@@ -32,7 +32,7 @@ interface Platform {
 }
 
 // 서버 렌더: 첫 HTML에 아이콘·글자가 바로 박힌다 (빈 화면 방지)
-export default async function LauncherPage() {
+export default async function LauncherPage({ searchParams }: { searchParams?: { cat?: string } }) {
   const [apps, cats, platform] = await Promise.all([
     get<AppRegistry[]>("/api/apps", []),
     get<{ name: string; count: number }[]>("/api/categories", []),
@@ -53,6 +53,7 @@ export default async function LauncherPage() {
         initialApps={apps}
         initialCats={cats}
         announcement={platform.announcement}
+        initialCat={typeof searchParams?.cat === "string" ? searchParams.cat : "전체"}
         grid={{ density: platform.gridDensity === "compact" ? "compact" : "comfortable", cols: platform.gridCols, showName: platform.showAppName !== false }}
       />
     </Shell>
