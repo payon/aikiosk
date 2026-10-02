@@ -7,11 +7,12 @@ const nextConfig = {
   productionBrowserSourceMaps: false,
   async rewrites() {
     // 단일 도메인: 브라우저에 포트를 노출하지 않는다.
-    // /admin/* → 어드민 앱, /api/* → 백엔드 API
+    // /admin/* → 어드민 앱, /api/* → 백엔드 API, /uploads/* → 업로드 아이콘
     return [
       { source: "/admin", destination: `${ADMIN}/admin` },
       { source: "/admin/:path*", destination: `${ADMIN}/admin/:path*` },
-      { source: "/api/:path*", destination: `${BACKEND}/api/:path*` }
+      { source: "/api/:path*", destination: `${BACKEND}/api/:path*` },
+      { source: "/uploads/:path*", destination: `${BACKEND}/uploads/:path*` }
     ];
   },
   async headers() {

@@ -195,9 +195,43 @@ const LoginSchema = z.object({ email: z.string().email(), password: z.string().m
 
 const app = express();
 app.set("trust proxy", true);
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "3mb" })); // 업로드(dataURL) 허용, Zod가 필드별 크기 제한
 app.use(cookieParser());
 app.use("/subapps", express.static(path.join(__dirname, "subapps")));
+
+// 업로드 아이콘 저장소 (Docker volume 권장: ./uploads)
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+try { require("fs").mkdirSync(UPLOAD_DIR, { recursive: true }); } catch { /* ignore */ }
+app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: false }));
+
+const UPLOAD_MIMES = {
+  "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/svg+xml": "svg"
+};
+
+// POST /api/admin/upload {filename, dataUrl} → {url} (ADMIN, 1.5MB 이하)
+app.post("/api/admin/upload", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    filename: z.string().min(1).max(100),
+    dataUrl: z.string().min(1).max(4_000_000)
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  const m = parsed.data.dataUrl.match(/^data:([a-z/+.-]+);base64,(.+)$/);
+  if (!m || !UPLOAD_MIMES[m[1]]) return fail(res, "VALIDATION", "png/jpg/webp/svg만 허용", 400);
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length > 1_500_000) return fail(res, "VALIDATION", "1.5MB 이하만 허용", 400);
+  if (m[1] === "image/svg+xml") {
+    const text = buf.toString("utf8");
+    if (/<script|on\w+\s*=|javascript:/i.test(text)) return fail(res, "VALIDATION", "SVG에 스크립트 불가", 400);
+  }
+  const safe = `${Date.now()}-${Math.random().toString(36).slice(2)}.${UPLOAD_MIMES[m[1]]}`;
+  try {
+    require("fs").writeFileSync(path.join(UPLOAD_DIR, safe), buf);
+  } catch {
+    return fail(res, "IO", "저장 실패", 500);
+  }
+  await audit(req.claims.userId, "icon.upload", safe, "success");
+  return ok(res, { url: `/uploads/${safe}` }, 201);
+});
 
 const ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
 const fail = (res, code, message, status = 400) => res.status(status).json({ success: false, error: { code, message } });

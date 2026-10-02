@@ -25,6 +25,32 @@ export default function Dashboard() {
   const [rename, setRename] = useState({ from: "", to: "" });
   const [moveTo, setMoveTo] = useState("전체");
   const [msg, setMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  async function uploadIcon(file: File): Promise<string | null> {
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      const r = await fetch("/api/admin/upload", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ filename: file.name, dataUrl })
+      });
+      const j = await r.json();
+      if (r.ok && j.success) { setMsg(`아이콘 업로드됨: ${j.data.url}`); return j.data.url as string; }
+      setMsg(j.error?.message ?? "업로드 실패 (png/jpg/webp/svg, 1.5MB 이하)");
+      return null;
+    } catch {
+      setMsg("업로드 실패");
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const load = () => {
     fetch("/api/auth/me").then(async (r) => {
@@ -205,6 +231,17 @@ export default function Dashboard() {
               {(["name", "slug", "targetUrl", "iconUrl", "description", "category"] as const).map((k) => (
                 <input key={k} className={input} placeholder={k} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
               ))}
+              <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">아이콘 업로드 (png/jpg/webp/svg, 1.5MB 이하)
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
+                  disabled={uploading}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const url = await uploadIcon(f);
+                    if (url) setForm((s) => ({ ...s, iconUrl: url }));
+                    e.target.value = "";
+                  }} />
+              </label>
               <select className={input} value={form.openMode} onChange={(e) => setForm({ ...form, openMode: e.target.value as "embed" | "direct" })} aria-label="열기 방식">
                 <option value="embed">통합 보기 (/apps/슬러그)</option>
                 <option value="direct">직접 이동 (targetUrl로 이동)</option>
@@ -235,6 +272,17 @@ export default function Dashboard() {
                   {(["name", "slug", "targetUrl", "iconUrl", "description", "category"] as const).map((k) => (
                     <input key={k} className={input} placeholder={k} value={editing[k] ?? ""} onChange={(e) => setEditing({ ...editing, [k]: e.target.value })} />
                   ))}
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">아이콘 업로드
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
+                      disabled={uploading}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const url = await uploadIcon(f);
+                        if (url && editing) setEditing({ ...editing, iconUrl: url });
+                        e.target.value = "";
+                      }} />
+                  </label>
                   <label className="flex items-center gap-2 min-h-[48px] text-[clamp(14px,2vw,16px)]">
                     <input type="checkbox" className="w-6 h-6" checked={!!editing.stripPrefix} onChange={(e) => setEditing({ ...editing, stripPrefix: e.target.checked })} />
                     루트형 앱 (상대가 basePath 없이 동작 → /apps/슬러그 제거 후 전달)

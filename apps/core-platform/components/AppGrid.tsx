@@ -35,6 +35,9 @@ function AppCard({ app, onClick }: { app: AppRegistry; onClick: () => void }) {
       <span className="font-semibold text-center text-[clamp(14px,2vw,16px)] md:text-[clamp(16px,2.5vw,18px)] lg:text-[clamp(16px,1.5vw,18px)] min-[1900px]:text-[clamp(24px,2vw,32px)] min-[2100px]:text-[clamp(32px,1.5vw,48px)]">
         {app.name}
       </span>
+      {app.openMode === "direct" && (
+        <span className="rounded-full border px-2 py-0.5 text-[clamp(10px,1.2vw,12px)] text-gray-500">외부 앱 · 뒤로가기로 복귀</span>
+      )}
       {app.description && (
         <span className="text-gray-500 text-center line-clamp-2 text-[clamp(12px,1.5vw,18px)] min-[1900px]:text-[clamp(18px,1.2vw,24px)]">
           {app.description}

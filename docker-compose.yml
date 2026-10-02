@@ -12,6 +12,7 @@ services:
       LOCAL_APPS: "false"
       ALLOW_LOCAL_APPS: "false"
     expose: ["4501"]
+    volumes: ["uploads-data:/srv/app/uploads"]
     restart: unless-stopped
 
   launcher:
@@ -62,3 +63,6 @@ services:
     environment: { PORT: "4513", NODE_ENV: production }
     expose: ["4513"]
     restart: unless-stopped
+
+volumes:
+  uploads-data:
