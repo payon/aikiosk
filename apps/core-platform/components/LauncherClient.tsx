@@ -2,19 +2,16 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AppGrid } from "@/components/AppGrid";
-import { useDeviceType } from "@/hooks/useDeviceType";
 import type { AppRegistry } from "@/types/app";
 
 interface Props {
   initialApps: AppRegistry[];
   initialCats: { name: string; count: number }[];
-  brand: string;
   announcement: string;
 }
 
-export function LauncherClient({ initialApps, initialCats, brand, announcement }: Props) {
+export function LauncherClient({ initialApps, initialCats, announcement }: Props) {
   const router = useRouter();
-  const device = useDeviceType();
   const [cat, setCat] = useState("전체");
   const [q, setQ] = useState("");
 
@@ -29,10 +26,6 @@ export function LauncherClient({ initialApps, initialCats, brand, announcement }
 
   return (
     <>
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <h1 className="text-[clamp(24px,3vw,36px)] font-bold">{brand}</h1>
-        <span className="text-[clamp(12px,1.5vw,18px)] text-gray-500">{device}</span>
-      </div>
       {announcement && (
         <p role="status" className="mb-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 min-h-[48px] flex items-center text-[clamp(14px,2vw,16px)]">
           {announcement}

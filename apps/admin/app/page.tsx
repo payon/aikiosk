@@ -4,11 +4,12 @@ import { useRouter } from "next/navigation";
 import { PreviewGrid, type AppRegistry } from "@/components/PreviewGrid";
 
 const LAUNCHER = process.env.NEXT_PUBLIC_LAUNCHER_URL || "/";
-type Tab = "overview" | "apps" | "categories" | "permissions" | "settings" | "audit";
+type Tab = "overview" | "apps" | "categories" | "users" | "permissions" | "settings" | "audit";
 
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
-interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; }
+interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; }
+interface AppUser { id: string; email: string; role: string; createdAt: string; }
 
 const EMPTY_APP: { name: string; slug: string; targetUrl: string; iconUrl: string; description: string; category: string; openMode: "embed" | "direct" } = { name: "", slug: "", targetUrl: "", iconUrl: "/icons/app.svg", description: "", category: "전체", openMode: "embed" };
 
@@ -18,7 +19,11 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRegistry[]>([]);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [] });
+  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "" });
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
+  const [newCat, setNewCat] = useState("");
+  const [auditFilter, setAuditFilter] = useState("");
   const [form, setForm] = useState(EMPTY_APP);
   const [editing, setEditing] = useState<(AppRegistry & { id: string }) | null>(null);
   const [perm, setPerm] = useState({ email: "", slug: "", accessLevel: "VIEW" });
@@ -74,8 +79,15 @@ export default function Dashboard() {
       if (j.success && j.data) setSettings({
         platformName: j.data.platformName ?? "", primaryColor: j.data.primaryColor ?? "#C2410C",
         logoUrl: j.data.logoUrl ?? "/logo.svg", announcement: j.data.announcement ?? "",
-        idleTimeoutMin: j.data.idleTimeoutMin ?? 3, menuOrder: j.data.menuOrder ?? []
+        idleTimeoutMin: j.data.idleTimeoutMin ?? 3, menuOrder: j.data.menuOrder ?? [],
+        backgroundType: j.data.backgroundType ?? "color",
+        backgroundColor: j.data.backgroundColor ?? "#FFF7ED",
+        backgroundImage: j.data.backgroundImage ?? ""
       });
+    }).catch(() => {});
+    fetch("/api/admin/users").then(async (r) => {
+      const j = await r.json();
+      if (j.success) setUsers(j.data);
     }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
@@ -89,7 +101,7 @@ export default function Dashboard() {
     const next = { ...settings, ...patch };
     const { ok, j } = await api("/api/admin/settings", {
       method: "PUT", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ platformName: next.platformName, primaryColor: next.primaryColor, logoUrl: next.logoUrl, announcement: next.announcement, idleTimeoutMin: Number(next.idleTimeoutMin), menuOrder: next.menuOrder })
+      body: JSON.stringify({ platformName: next.platformName, primaryColor: next.primaryColor, logoUrl: next.logoUrl, announcement: next.announcement, idleTimeoutMin: Number(next.idleTimeoutMin), menuOrder: next.menuOrder, backgroundType: next.backgroundType, backgroundColor: next.backgroundColor, backgroundImage: next.backgroundImage })
     });
     setMsg(ok ? done : (j.error?.message ?? "실패"));
     if (ok) setSettings(next);
@@ -152,6 +164,40 @@ export default function Dashboard() {
     load();
   }
 
+  async function createUser(e: React.FormEvent) {
+    e.preventDefault();
+    const { ok, j } = await api("/api/admin/users", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(newUser)
+    });
+    setMsg(ok ? "사용자 생성됨" : (j.error?.message ?? "실패"));
+    if (ok) { setNewUser({ email: "", password: "", role: "USER" }); load(); }
+  }
+
+  async function updateUser(id: string, data: { role?: string; password?: string }) {
+    const { ok, j } = await api("/api/admin/users", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...data })
+    });
+    setMsg(ok ? "사용자 수정됨" : (j.error?.message ?? "실패"));
+    if (ok) load();
+  }
+
+  async function removeUser(id: string, email: string) {
+    if (!confirm(`${email} 사용자를 삭제할까요?`)) return;
+    const r = await fetch(`/api/admin/users?id=${id}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    setMsg(r.ok && j.success ? "사용자 삭제됨" : (j.error?.message ?? "실패"));
+    load();
+  }
+
+  async function createCat(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newCat.trim();
+    if (!name) return;
+    const order = settings.menuOrder.includes(name) ? settings.menuOrder : [...settings.menuOrder, ...cats.filter((c) => !settings.menuOrder.includes(c)), name];
+    saveSettings({ menuOrder: order }, `카테고리 "${name}" 생성됨 → 런처 메뉴에 반영`);
+    setNewCat("");
+  }
+
   async function renameCat(e: React.FormEvent) {
     e.preventDefault();
     const { ok, j } = await api("/api/admin/categories", {
@@ -186,6 +232,7 @@ export default function Dashboard() {
     { id: "overview", label: "개요" },
     { id: "apps", label: "앱 관리" },
     { id: "categories", label: "카테고리·메뉴" },
+    { id: "users", label: "사용자" },
     { id: "permissions", label: "권한" },
     { id: "settings", label: "설정" },
     { id: "audit", label: "감사 로그" }
@@ -307,7 +354,12 @@ export default function Dashboard() {
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">카테고리·메뉴 관리</h1>
             <p className="text-[clamp(14px,2vw,16px)] text-gray-600 mb-3">런처 상단 메뉴 탭 순서·이름을 여기서 관리합니다.</p>
-            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">메뉴 순서</h2>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">새 카테고리 만들기</h2>
+            <form onSubmit={createCat} className="flex gap-2 max-w-lg mb-6">
+              <input className={`${input} flex-1`} placeholder="새 카테고리 이름" value={newCat} onChange={(e) => setNewCat(e.target.value)} aria-label="새 카테고리 이름" />
+              <button className={primary}>생성</button>
+            </form>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">메뉴 순서·삭제</h2>
             <ul className="grid gap-2 mb-6">
               {cats.map((c) => (
                 <li key={c} className="bg-white border rounded-lg p-3 flex items-center gap-2 text-[clamp(14px,2vw,16px)]">
@@ -328,6 +380,37 @@ export default function Dashboard() {
             <div className="max-w-lg bg-white border rounded-2xl p-4">
               <input className={`${input} w-full`} placeholder="이동처 카테고리 (기본: 전체)" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="이동처 카테고리" />
             </div>
+          </section>
+        )}
+
+        {tab === "users" && (
+          <section>
+            <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">사용자 관리</h1>
+            <form onSubmit={createUser} className="grid gap-2 max-w-lg bg-white border rounded-2xl p-4 mb-4">
+              <input className={input} placeholder="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+              <input className={input} placeholder="password (8자 이상)" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+              <select className={input} value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })} aria-label="역할">
+                <option value="USER">USER</option>
+                <option value="ADMIN">ADMIN</option>
+              </select>
+              <button className={primary}>사용자 생성</button>
+            </form>
+            <ul className="grid gap-2">
+              {users.map((u) => (
+                <li key={u.id} className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-2 text-[clamp(14px,2vw,16px)]">
+                  <span className="flex-1 min-w-[180px]">{u.email} · {u.role}</span>
+                  <select className={input} value={u.role} onChange={(e) => updateUser(u.id, { role: e.target.value })} aria-label={`${u.email} 역할`}>
+                    <option value="USER">USER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <button className={btn} onClick={() => {
+                    const pw = prompt(`${u.email} 새 비밀번호 (8자 이상)`);
+                    if (pw) updateUser(u.id, { password: pw });
+                  }}>비번 초기화</button>
+                  <button className={btn} onClick={() => removeUser(u.id, u.email)}>삭제</button>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 
@@ -377,6 +460,35 @@ export default function Dashboard() {
               <label className="text-[clamp(14px,2vw,16px)]">키오스크 유휴 타임아웃 (분, 1~30)
                 <input type="number" min={1} max={30} className={`${input} w-full mt-1`} value={settings.idleTimeoutMin} onChange={(e) => setSettings({ ...settings, idleTimeoutMin: Number(e.target.value) })} />
               </label>
+              <label className="text-[clamp(14px,2vw,16px)]">런처 배경
+                <span className="flex gap-2 mt-1">
+                  <select className={input} value={settings.backgroundType} onChange={(e) => setSettings({ ...settings, backgroundType: e.target.value })} aria-label="배경 방식">
+                    <option value="color">단색(RGB)</option>
+                    <option value="image">이미지</option>
+                  </select>
+                  {settings.backgroundType === "color" ? (
+                    <span className="flex gap-2 flex-1">
+                      <input type="color" className="min-h-[48px] min-w-[48px]" value={settings.backgroundColor} onChange={(e) => setSettings({ ...settings, backgroundColor: e.target.value })} aria-label="배경 색상 선택" />
+                      <input className={`${input} flex-1`} value={settings.backgroundColor} onChange={(e) => setSettings({ ...settings, backgroundColor: e.target.value })} />
+                    </span>
+                  ) : (
+                    <input className={`${input} flex-1`} placeholder="/uploads/배너.png 또는 https://…" value={settings.backgroundImage} onChange={(e) => setSettings({ ...settings, backgroundImage: e.target.value })} />
+                  )}
+                </span>
+              </label>
+              {settings.backgroundType === "image" && (
+                <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">배경 이미지 업로드
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className={`${input} pt-2`}
+                    disabled={uploading}
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      const url = await uploadIcon(f);
+                      if (url) setSettings((s) => ({ ...s, backgroundImage: url }));
+                      e.target.value = "";
+                    }} />
+                </label>
+              )}
               <button className={primary} onClick={() => saveSettings({})}>설정 저장 → 런처에 반영</button>
             </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">타이틀 미리보기</h2>
@@ -390,8 +502,9 @@ export default function Dashboard() {
         {tab === "audit" && (
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">감사 로그</h1>
+            <input className="min-h-[48px] w-full max-w-md border rounded-lg px-3 mb-3 text-[clamp(14px,2vw,16px)] bg-white" placeholder="필터 (예: app.register, admin@…)" value={auditFilter} onChange={(e) => setAuditFilter(e.target.value)} aria-label="감사 로그 필터" />
             <ul className="grid gap-1">
-              {audit.map((a) => (
+              {audit.filter((a) => !auditFilter.trim() || `${a.action} ${a.actorId} ${a.target ?? ""} ${a.result}`.includes(auditFilter.trim())).map((a) => (
                 <li key={a.id} className="bg-white text-[clamp(12px,1.5vw,14px)] border-b py-2 px-2">
                   {new Date(a.createdAt).toLocaleString("ko-KR")} — {a.action} — {a.target ?? "-"} — {a.result}
                 </li>

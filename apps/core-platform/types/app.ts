@@ -16,5 +16,6 @@ export interface ShellLayoutProps {
   currentSlug?: string;
   brand?: string;
   idleMin?: number;
+  bodyStyle?: import("react").CSSProperties;
   children: React.ReactNode;
 }

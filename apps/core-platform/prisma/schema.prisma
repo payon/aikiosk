@@ -60,6 +60,9 @@ model PlatformSetting {
   announcement   String   @default("")
   idleTimeoutMin Int      @default(3)
   menuOrder      String[]
+  backgroundType String   @default("color")
+  backgroundColor String  @default("#FFF7ED")
+  backgroundImage String  @default("")
   updatedAt      DateTime @updatedAt
 }
 

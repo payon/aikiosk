@@ -113,8 +113,19 @@ let auditMem = [];
 let settingsMem = {
   platformDomain: DOMAIN, platformName: "러스트코리아", primaryColor: "#C2410C",
   logoUrl: "/logo.svg", allowedDomains: [DOMAIN],
-  announcement: "", idleTimeoutMin: 3, menuOrder: []
+  announcement: "", idleTimeoutMin: 3, menuOrder: [],
+  backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: ""
 };
+// 인메모리 사용자 (DB 없을 때 CRUD 시연용, 비밀번호 bcrypt 해시)
+const bcryptSync = require("bcryptjs");
+let usersMem = [
+  { id: "seed-admin", email: "admin@rustkorea.cloud", role: "ADMIN", passwordHash: bcryptSync.hashSync("Admin123!", 10), createdAt: new Date().toISOString() },
+  { id: "demo-user", email: "user@rustkorea.cloud", role: "USER", passwordHash: bcryptSync.hashSync("User123!", 10), createdAt: new Date().toISOString() }
+];
+function emailOf(userId) {
+  const u = usersMem.find((x) => x.id === userId);
+  return u ? u.email : undefined;
+}
 
 async function getAllApps() {
   if (!prisma) return store;
@@ -137,7 +148,10 @@ function publicSettings(s) {
   return {
     platformName: s.platformName, primaryColor: s.primaryColor, logoUrl: s.logoUrl,
     announcement: s.announcement || "", idleTimeoutMin: s.idleTimeoutMin || 3,
-    menuOrder: s.menuOrder || []
+    menuOrder: s.menuOrder || [],
+    backgroundType: s.backgroundType || "color",
+    backgroundColor: s.backgroundColor || "#FFF7ED",
+    backgroundImage: s.backgroundImage || ""
   };
 }
 async function audit(actorId, action, target, result) {
@@ -253,6 +267,10 @@ function orderCats(rows, menuOrder) {
     const c = a.category || "전체";
     map.set(c, (map.get(c) || 0) + 1);
   }
+  // 빈 카테고리도 메뉴에 유지 (menuOrder에 있으면 count 0으로 표시)
+  for (const name of menuOrder || []) {
+    if (!map.has(name)) map.set(name, 0);
+  }
   const list = [...map.entries()].map(([name, count]) => ({ name, count }));
   const rank = new Map((menuOrder || []).map((n, i) => [n, i]));
   list.sort((a, b) => (rank.get(a.name) ?? 999) - (rank.get(b.name) ?? 999) || a.name.localeCompare(b.name, "ko"));
@@ -297,14 +315,15 @@ app.post("/api/auth/login", async (req, res) => {
       await audit(email, "auth.login", undefined, "fail");
     } catch { /* 폴백 */ }
   }
-  // 데모 계정 (DB 미연결): admin 전체 / user 제한
-  const demo = { "admin@rustkorea.cloud": ["Admin123!", "ADMIN"], "user@rustkorea.cloud": ["User123!", "USER"] }[email];
-  if (!prisma && demo && password === demo[0]) {
-    const uid = email === "admin@rustkorea.cloud" ? "seed-admin" : "demo-user";
-    res.cookie("session_token", createSessionToken(uid, demo[1]), {
-      httpOnly: true, secure: IS_PROD, sameSite: "lax", path: "/", maxAge: MAX_AGE * 1000
-    });
-    return ok(res, { role: demo[1] });
+  // 데모 계정 (DB 미연결): usersMem에서 bcrypt 비교
+  if (!prisma) {
+    const u = usersMem.find((x) => x.email === email);
+    if (u && (await bcrypt.compare(password, u.passwordHash))) {
+      res.cookie("session_token", createSessionToken(u.id, u.role), {
+        httpOnly: true, secure: IS_PROD, sameSite: "lax", path: "/", maxAge: MAX_AGE * 1000
+      });
+      return ok(res, { role: u.role });
+    }
   }
   return fail(res, "UNAUTH", "이메일 또는 비밀번호가 올바르지 않습니다.", 401);
 });
@@ -320,8 +339,9 @@ async function slugsFor(claims) {
       if (user) return user.permissions.filter((p) => p.app.isActive).map((p) => p.app.slug);
     } catch { /* fallthrough */ }
   }
-  if (claims.userId === "demo-user") {
-    const granted = permMem.filter((p) => p.email === "user@rustkorea.cloud").map((p) => p.slug);
+  if (claims.userId === "demo-user" || (!prisma && claims.role !== "ADMIN")) {
+    const email = emailOf(claims.userId);
+    const granted = permMem.filter((p) => p.email === email).map((p) => p.slug);
     return rows.filter((a) => granted.includes(a.slug)).map((a) => a.slug);
   }
   return rows.map((a) => a.slug);
@@ -330,8 +350,8 @@ async function slugsFor(claims) {
 app.get("/api/auth/me", async (req, res) => {
   const c = verifySessionToken(req.cookies.session_token || "");
   if (!c) return fail(res, "UNAUTH", "No session", 401);
-  let email = c.userId === "seed-admin" ? "ad***@rustkorea.cloud"
-    : c.userId === "demo-user" ? "us***@rustkorea.cloud" : undefined;
+  let email = emailOf(c.userId);
+  if (email) email = maskEmail(email);
   if (prisma && c.userId !== "seed-admin" && c.userId !== "demo-user" && c.userId !== "demo") {
     try {
       const user = await prisma.user.findUnique({ where: { id: c.userId } });
@@ -444,7 +464,6 @@ app.delete("/api/admin/categories", requireAdmin, async (req, res) => {
   if (!from) return fail(res, "VALIDATION", "from required", 400);
   if (!prisma) {
     const targets = store.filter((a) => (a.category || "전체") === from);
-    if (!targets.length) return fail(res, "NOT_FOUND", "해당 카테고리 없음", 404);
     targets.forEach((a) => { a.category = moveTo; });
     settingsMem.menuOrder = (settingsMem.menuOrder || []).filter((m) => m !== from);
     await audit(req.claims.userId, "category.delete", `${from}→${moveTo}`, "success");
@@ -513,6 +532,101 @@ app.delete("/api/admin/permissions", requireAdmin, async (req, res) => {
   return ok(res, null);
 });
 
+// ----- Admin: users -----
+function publicUser(u) {
+  return { id: u.id, email: u.email, role: u.role, createdAt: u.createdAt };
+}
+
+app.get("/api/admin/users", requireAdmin, async (req, res) => {
+  if (prisma) {
+    try {
+      const rows = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
+      return ok(res, rows.map(publicUser));
+    } catch { /* fallthrough */ }
+  }
+  return ok(res, usersMem.map(publicUser));
+});
+
+app.post("/api/admin/users", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    email: z.string().email().max(100),
+    password: z.string().min(8).max(100),
+    role: z.enum(["ADMIN", "USER"]).default("USER")
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (prisma) {
+    try {
+      const created = await prisma.user.create({
+        data: { email: parsed.data.email, passwordHash: await bcrypt.hash(parsed.data.password, 12), role: parsed.data.role }
+      });
+      await audit(req.claims.userId, "user.create", parsed.data.email, "success");
+      return ok(res, publicUser(created), 201);
+    } catch {
+      return fail(res, "CONFLICT", "이메일 중복 또는 DB 오류", 409);
+    }
+  }
+  if (usersMem.some((u) => u.email === parsed.data.email)) return fail(res, "CONFLICT", "이메일 중복", 409);
+  const row = {
+    id: `u-${Date.now()}`, email: parsed.data.email, role: parsed.data.role,
+    passwordHash: await bcrypt.hash(parsed.data.password, 10), createdAt: new Date().toISOString()
+  };
+  usersMem.push(row);
+  await audit(req.claims.userId, "user.create", row.email, "success");
+  return ok(res, publicUser(row), 201);
+});
+
+app.patch("/api/admin/users", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    id: z.string().min(1),
+    role: z.enum(["ADMIN", "USER"]).optional(),
+    password: z.string().min(8).max(100).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", parsed.error.message, 400);
+  if (parsed.data.id === req.claims.userId && parsed.data.role && parsed.data.role !== "ADMIN") {
+    return fail(res, "VALIDATION", "자기 자신의 관리자 권한은 해제할 수 없음", 400);
+  }
+  if (prisma) {
+    try {
+      const data = {};
+      if (parsed.data.role) data.role = parsed.data.role;
+      if (parsed.data.password) data.passwordHash = await bcrypt.hash(parsed.data.password, 12);
+      const updated = await prisma.user.update({ where: { id: parsed.data.id }, data });
+      await audit(req.claims.userId, "user.update", updated.email, "success");
+      return ok(res, publicUser(updated));
+    } catch {
+      return fail(res, "NOT_FOUND", "사용자 없음", 404);
+    }
+  }
+  const u = usersMem.find((x) => x.id === parsed.data.id);
+  if (!u) return fail(res, "NOT_FOUND", "사용자 없음", 404);
+  if (parsed.data.role) u.role = parsed.data.role;
+  if (parsed.data.password) u.passwordHash = await bcrypt.hash(parsed.data.password, 10);
+  await audit(req.claims.userId, "user.update", u.email, "success");
+  return ok(res, publicUser(u));
+});
+
+app.delete("/api/admin/users", requireAdmin, async (req, res) => {
+  const { id } = req.query;
+  if (!id) return fail(res, "VALIDATION", "id required", 400);
+  if (String(id) === req.claims.userId) return fail(res, "VALIDATION", "자기 자신은 삭제할 수 없음", 400);
+  if (prisma) {
+    try {
+      const u = await prisma.user.findUnique({ where: { id: String(id) } });
+      if (!u) return fail(res, "NOT_FOUND", "사용자 없음", 404);
+      await prisma.user.delete({ where: { id: String(id) } });
+      await audit(req.claims.userId, "user.delete", u.email, "success");
+      return ok(res, null);
+    } catch {
+      return fail(res, "NOT_FOUND", "사용자 없음", 404);
+    }
+  }
+  const u = usersMem.find((x) => x.id === String(id));
+  usersMem = usersMem.filter((x) => x.id !== String(id));
+  if (u) permMem = permMem.filter((p) => p.email !== u.email);
+  await audit(req.claims.userId, "user.delete", u ? u.email : String(id), "success");
+  return ok(res, null);
+});
+
 // ----- Admin: settings -----
 const SettingsSchema = z.object({
   platformName: z.string().min(1).max(100).optional(),
@@ -520,7 +634,13 @@ const SettingsSchema = z.object({
   logoUrl: z.string().max(500).optional(),
   announcement: z.string().max(300).optional(),
   idleTimeoutMin: z.number().int().min(1).max(30).optional(),
-  menuOrder: z.array(z.string().max(50)).max(50).optional()
+  menuOrder: z.array(z.string().max(50)).max(50).optional(),
+  backgroundType: z.enum(["color", "image"]).optional(),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  backgroundImage: z.string().max(500).optional().refine(
+    (v) => !v || v.startsWith("/uploads/") || v.startsWith("https://"),
+    { message: "배경 이미지는 /uploads/ 또는 https:// 만 허용" }
+  )
 });
 
 app.get("/api/admin/settings", requireAdmin, async (req, res) => ok(res, publicSettings(await getSettings())));
