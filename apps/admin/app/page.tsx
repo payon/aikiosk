@@ -54,6 +54,7 @@ export default function Dashboard() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragType, setDragType] = useState<string | null>(null);
   const [previewW, setPreviewW] = useState(390);
+  const [pvIdx, setPvIdx] = useState(0);
   const [selComp, setSelComp] = useState<string | null>(null);
 
   function addComp(type: string) {
@@ -311,29 +312,36 @@ export default function Dashboard() {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(newTpl)
     });
     result(ok, "템플릿 생성됨", j);
-    if (ok) { setNewTpl({ name: "", slug: "", category: "전체" }); load(); }
+    if (ok) {
+      setNewTpl({ name: "", slug: "", category: "전체" });
+      const nid = (j.data as { id: string }).id;
+      load();
+      // 생성 후 바로 편집기 열기 (빈 화면 방지)
+      setTimeout(() => openTplById(nid), 300);
+    }
+  }
+
+  async function openTplById(id: string) {
+    const r = await fetch("/api/admin/templates", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.success && j.data) {
+      const full = j.data as TplFull;
+      setTpl({ ...full, pages: full.pages || [], completePageId: full.completePageId ?? null, versions: full.versions || [] });
+      setTplPage(0);
+      setPvIdx(0);
+    }
   }
 
   async function openTpl(id: string) {
-    // 전체 목록에서 찾되 pages까지 필요하면 PATCH 전 최신 스냅샷 유지: 목록에는 pages가 없으므로 빈 편집기로 시작하지 않고 서버 전체 조회를 위해 임시 저장 후 PATCH 사용
-    const cur = tpls.find((t) => t.id === id);
-    if (!cur) return;
-    setTpl({ ...cur, pages: (tpl && tpl.id === id) ? tpl.pages : [], completePageId: (tpl && tpl.id === id) ? tpl.completePageId : null, versions: (tpl && tpl.id === id) ? tpl.versions : [] });
-    setTplPage(0);
-    // 최신 pages 복원: 빈 PATCH가 아닌 조회 전용이 없으므로 로컬 유지 (저장 시 서버 값과 병합되지 않음 — 편집 전 주의)
-    const { ok, j } = await api("/api/admin/templates", {
-      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id })
-    });
-    if (ok && j.data && (j.data as TplFull).pages) {
-      const full = j.data as TplFull;
-      setTpl({ ...cur, pages: full.pages || [], completePageId: full.completePageId ?? null, versions: full.versions || [] });
-    }
+    await openTplById(id);
   }
 
   async function saveTpl(t: TplFull, msg = "템플릿 저장됨") {
     const { ok, j } = await api("/api/admin/templates", {
       method: "PATCH", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: t.id, name: t.name, category: t.category, pages: t.pages, completePageId: t.completePageId ?? null })
+      body: JSON.stringify({ id: t.id, name: t.name, category: t.category, industry: t.industry || "", tags: t.tags || "", runMode: t.runMode || "live", pages: t.pages, completePageId: t.completePageId ?? null })
     });
     result(ok, msg, j);
     if (ok) { setTpl({ ...t }); load(); }
@@ -985,13 +993,26 @@ export default function Dashboard() {
                   <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500 mb-2">팔레트에서 드래그해서 놓으면 현재 페이지에 추가 · 클릭하면 편집기로 이동</p>
                   <div className="pv-items mx-auto bg-white rounded-xl border grid gap-2 p-3" style={{ width: previewW, maxWidth: "none" }}>
                     <div className="px-3 min-h-[44px] flex items-center gap-2 border-b font-bold">{tpl.name}</div>
+                    <div className="flex gap-1 items-center px-1">
+                      <button className="min-h-[44px] px-2 border rounded-lg" onClick={() => setPvIdx((i) => Math.max(0, i - 1))} aria-label="이전 미리보기">◀</button>
+                      <span className="flex-1 text-center text-[clamp(12px,1.5vw,14px)] text-gray-500">
+                        {(tpl.pages[pvIdx] || tpl.pages[0] || { title: "없음" }).title} ({Math.min(pvIdx + 1, tpl.pages.length)}/{tpl.pages.length || 0}) — 버튼 클릭 시 실제 이동
+                      </span>
+                      <button className="min-h-[44px] px-2 border rounded-lg" onClick={() => setPvIdx((i) => Math.min(tpl.pages.length - 1, i + 1))} aria-label="다음 미리보기">▶</button>
+                    </div>
                     <div className="pv-nodes p-3 grid gap-2">
-                      {((tpl.pages[tplPage] || tpl.pages[0] || { components: [] }).components || []).map((c) => {
+                      {((tpl.pages[pvIdx] || tpl.pages[0] || { components: [] }).components || []).map((c) => {
                         const p = (c.props || {}) as Record<string, string | number | string[]>;
+                        const goPv = (target: string) => {
+                          if (!target) return;
+                          const i = tpl.pages.findIndex((x) => x.id === target);
+                          if (i >= 0) setPvIdx(i);
+                        };
                         if (c.type === "text") return <div key={c.id} style={{ fontSize: Number(p.size) || 18 }}>{String(p.content || "텍스트")}</div>;
-                        if (c.type === "button") return <div key={c.id} style={{ background: String(p.bg || "#C2410C"), color: String(p.color || "#fff"), borderRadius: 12, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>{String(p.label || "버튼")}</div>;
+                        if (c.type === "button") return <button key={c.id} onClick={() => goPv(String(p.target || ""))} style={{ background: String(p.bg || "#C2410C"), color: String(p.color || "#fff"), borderRadius: 12, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", border: 0, width: "100%" }}>{String(p.label || "버튼")}</button>;
                         if (c.type === "image") return <div key={c.id} style={{ background: "#eee", borderRadius: 12, minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", color: "#888" }}>🖼 이미지</div>;
                         if (c.type === "video") return <div key={c.id} style={{ background: "#000", color: "#fff", borderRadius: 12, minHeight: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>▶ 동영상</div>;
+                        if (c.type === "html") return <div key={c.id} dangerouslySetInnerHTML={{ __html: String(p.html || "") }} />;
                         if (c.type === "html") return <div key={c.id} style={{ border: "1px dashed #aaa", borderRadius: 10, padding: 10, color: "#666" }}>&lt;HTML&gt; 미리보기는 실제 화면에서 확인</div>;
                         if (c.type === "appbar") return <div key={c.id} style={{ background: String(p.bg || "#0d9488"), color: "#fff", borderRadius: 10, padding: 12, fontWeight: "bold" }}>{String(p.title || "제목")}</div>;
                         if (c.type === "quiz") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10 }}>❓ {String(p.question || "질문")}</div>;
