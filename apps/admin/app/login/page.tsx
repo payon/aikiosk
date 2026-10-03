@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -7,6 +8,14 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
+  // 유효 세션이면 대시보드로 (로그인 화면 갇힘 방지). 단, 일반 계정은 머문다.
+  useEffect(() => {
+    fetch("/api/auth/me").then(async (r) => {
+      if (!r.ok) return;
+      const j = await r.json().catch(() => null);
+      if (j?.success && j.data?.role === "ADMIN") router.replace("/");
+    }).catch(() => {});
+  }, [router]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr("");

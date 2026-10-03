@@ -129,8 +129,9 @@ export default function Dashboard() {
   }
 
   const load = () => {
+    // 401(미인증)일 때만 로그인으로. 500·네트워크 오류(백엔드 재시작 순간)에는 유지.
     fetch("/api/auth/me").then(async (r) => {
-      if (!r.ok) router.replace("/login");
+      if (r.status === 401) router.replace("/login");
     }).catch(() => {});
     fetch("/api/admin/apps").then(async (r) => {
       const j = await r.json();
