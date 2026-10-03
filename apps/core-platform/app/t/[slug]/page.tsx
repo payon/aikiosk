@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import DOMPurify from "dompurify";
 
 interface Comp { id: string; type: string; props: Record<string, unknown>; }
-interface Page { id: string; title: string; components: Comp[]; }
+interface Page { id: string; title: string; bg?: string; bgImage?: string; components: Comp[]; }
 interface Tpl { slug: string; name: string; pages: Page[]; completePageId?: string | null; version: number; status?: string; }
 interface Action { type: string; [k: string]: unknown; }
 
@@ -74,7 +74,29 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", flushQueue);
 }
 
+function Placed({ c, children }: { c: Comp; children: React.ReactNode }) {
+  const p = c.props || {};
+  const mt = Math.min(200, Math.max(0, num(p.mt, 0)));
+  const align = str(p.align, "");
+  return (
+    <div style={{
+      marginTop: mt || undefined,
+      display: "flex", flexDirection: "column",
+      alignItems: align === "center" ? "center" : align === "right" ? "flex-end" : "stretch"
+    }}>{children}</div>
+  );
+}
+
 function CompView({ c, go, act, cartAdd }: {
+  c: Comp; go: (target: string) => void;
+  act: (actions: Action[]) => void; cartAdd: (name: string, price: number) => void;
+}) {
+  const p = c.props || {};
+  const inner = CompInner({ c, go, act, cartAdd });
+  return <Placed c={c}>{inner}</Placed>;
+}
+
+function CompInner({ c, go, act, cartAdd }: {
   c: Comp; go: (target: string) => void;
   act: (actions: Action[]) => void; cartAdd: (name: string, price: number) => void;
 }) {
@@ -97,6 +119,7 @@ function CompView({ c, go, act, cartAdd }: {
     );
   }
   if (c.type === "button") {
+    const auto = str(p.w, "full") === "auto";
     return (
       <button onClick={() => {
         if (str(p.tts)) speak(str(p.tts));
@@ -104,7 +127,8 @@ function CompView({ c, go, act, cartAdd }: {
         else go(str(p.target, ""));
       }}
         style={{
-          minHeight: Math.max(48, num(p.height, 64)), width: "100%",
+          minHeight: Math.max(48, num(p.height, 64)), width: auto ? "auto" : "100%",
+          padding: auto ? "0 28px" : undefined,
           background: str(p.bg, "#C2410C"), color: str(p.color, "#fff"),
           fontSize: num(p.size, 22), borderRadius: 14, border: 0, margin: "6px 0"
         }}>
@@ -142,9 +166,10 @@ function CompView({ c, go, act, cartAdd }: {
     );
   }
   if (c.type === "nav") {
+    const auto = str(p.w, "full") === "auto";
     return (
       <button onClick={() => go(str(p.target, "/"))}
-        style={{ minHeight: 48, width: "100%", borderRadius: 10, border: "1px solid #ccc", background: "#fff", fontSize: 16, margin: "6px 0" }}>
+        style={{ minHeight: 48, width: auto ? "auto" : "100%", padding: auto ? "0 20px" : undefined, borderRadius: 10, border: "1px solid #ccc", background: "#fff", fontSize: 16, margin: "6px 0" }}>
         {str(p.label, "이동")}
       </button>
     );
@@ -362,10 +387,13 @@ export default function TemplateView({ params }: { params: { slug: string } }) {
   if (!tpl) return <main className="min-h-screen flex items-center justify-center p-4">불러오는 중…</main>;
   const page = tpl.pages[pageIdx] || tpl.pages[0];
   if (!page) return <main className="min-h-screen flex items-center justify-center p-4">빈 템플릿입니다</main>;
+  const pageBg = page.bgImage
+    ? { backgroundImage: `url(${page.bgImage})`, backgroundSize: "cover", backgroundPosition: "center" }
+    : { background: page.bg || "#FFF7ED" };
   const total = cart.reduce((s, i) => s + i.price, 0);
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "#FFF7ED" }}>
+    <div className="min-h-screen flex flex-col" style={pageBg as React.CSSProperties}>
       <header className="sticky top-0 z-10 bg-white/95 border-b px-4 min-h-[48px] flex items-center gap-2">
         <button onClick={() => router.push("/")} className="min-h-[48px] min-w-[48px]" aria-label="런처로">←</button>
         <b className="text-[clamp(16px,2vw,24px)]">{tpl.name} · {page.title}</b>

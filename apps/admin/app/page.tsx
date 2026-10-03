@@ -25,7 +25,7 @@ interface Settings { platformName: string; primaryColor: string; logoUrl: string
 interface TplList { id: string; slug: string; name: string; category?: string; status: string; version: number; pageCount: number; updatedAt: string; }
 interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; industry?: string; tags?: string; runMode?: string; }
 interface DsList { id: string; name: string; columns: string[]; total: number; }
-interface TplPage { id: string; title: string; components: TplComp[]; }
+interface TplPage { id: string; title: string; bg?: string; bgImage?: string; components: TplComp[]; }
 interface TplComp { id: string; type: string; props: Record<string, unknown>; }
 interface StatRow { slug?: string; uuid?: string; date?: string; starts: number; completes: number; rate?: number; }
 interface Stats { perDay: StatRow[]; perApp: StatRow[]; perDevice: StatRow[]; errors: number; surveys?: number; surveyDetail?: { appSlug: string; question: string; c5: number; c3: number; c1: number; n: number; avg: number }[]; recentErrors?: { deviceUuid: string; appSlug: string; at: string }[]; }
@@ -848,7 +848,24 @@ export default function Dashboard() {
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">템플릿 (키오스크 화면 에디터)</h1>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">데이터셋 (엑셀 일괄등록)</h2>
             <div className="bg-white border rounded-2xl p-4 mb-4 grid gap-2">
-              <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500">.xlsx/.csv 첫 행 헤더 (이름·가격·이미지·카테고리·재고), 500행까지. 상품그리드에서 바인딩.</p>
+              <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500">.xlsx/.csv 첫 행 헤더 (이름·가격·이미지·카테고리·재고), 500행까지. 상품그리드에서 바인딩. 샘플 양식을 받아 채운 뒤 업로드하세요.</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { n: "카페 메뉴 양식", h: "이름,가격,카테고리,이미지", r: "아메리카노,3000,커피,\n카페라떼,4000,커피," },
+                  { n: "음식 주문 양식", h: "이름,가격,카테고리,이미지", r: "김치찌개,8000,한식,\n된장찌개,8000,한식," },
+                  { n: "좌석표 양식 (예약용)", h: "좌석번호,등급,가격,상태", r: "A1,일반,10000,가능\nA2,일반,10000,가능\nB1,우등,15000,가능" },
+                  { n: "의사 일정 양식 (예약용)", h: "의사,진료과,시간,상태", r: "김의사,내과,09:00,가능\n이의사,외과,10:00,가능" }
+                ].map((s) => (
+                  <button key={s.n} className={btn} onClick={() => {
+                    const blob = new Blob([`﻿${s.h}\n${s.r}`], { type: "text/csv;charset=utf-8" });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${s.n}.csv`;
+                    a.click();
+                    notify("샘플 양식 다운로드됨");
+                  }}>📝 {s.n}</button>
+                ))}
+              </div>
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 const fd = new FormData(e.target as HTMLFormElement);
@@ -1099,7 +1116,8 @@ export default function Dashboard() {
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {tpl.pages.map((p, i) => (
                     <button key={p.id} onClick={() => setTplPage(i)}
-                      className={`min-h-[48px] whitespace-nowrap rounded-lg border px-3 ${i === tplPage ? "bg-gray-900 text-white font-bold" : ""}`}>{p.title}</button>
+                      className={`min-h-[48px] whitespace-nowrap rounded-lg border px-3 ${i === tplPage ? "bg-gray-900 text-white font-bold" : ""}`}>
+                      {p.title} ({(p.components || []).length}개){tpl.completePageId === p.id ? " ★완료" : ""}</button>
                   ))}
                 </div>
                 {tpl.pages[tplPage] && (
@@ -1107,6 +1125,21 @@ export default function Dashboard() {
                     <div className="flex gap-2 items-center">
                       <input className={`${input} flex-1`} value={tpl.pages[tplPage].title}
                         onChange={(e) => updPage(tpl.pages[tplPage].id, { title: e.target.value })} aria-label="페이지 제목" />
+                      <input type="color" className="min-h-[48px] min-w-[48px]" value={tpl.pages[tplPage].bg || "#FFF7ED"}
+                        onChange={(e) => updPage(tpl.pages[tplPage].id, { bg: e.target.value })} aria-label="화면 배경색" title="화면 배경색" />
+                      <label className={`${btn} cursor-pointer`}>배경이미지
+                        <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                          onChange={async (e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            const url = await uploadIcon(f);
+                            if (url) updPage(tpl.pages[tplPage].id, { bgImage: url });
+                            e.target.value = "";
+                          }} />
+                      </label>
+                      {(tpl.pages[tplPage].bgImage) && (
+                        <button className={btn} onClick={() => updPage(tpl.pages[tplPage].id, { bgImage: "" })}>배경삭제</button>
+                      )}
                       <button className={btn} onClick={() => {
                         const ps = tpl.pages.filter((_, j) => j !== tplPage);
                         updTpl({ pages: ps }); setTplPage(0);
@@ -1150,7 +1183,6 @@ export default function Dashboard() {
                         <div className="flex items-center gap-2">
                           <span className="cursor-move text-gray-400" title="드래그로 순서 변경">⠿</span>
                           <b className="text-[clamp(13px,2vw,15px)]">{c.type}</b>
-                          <span className="flex-1" />
                           <button className={btn} onClick={() => {
                             const arr = [...tpl.pages[tplPage].components];
                             if (ci > 0) { [arr[ci - 1], arr[ci]] = [arr[ci], arr[ci - 1]]; updPage(tpl.pages[tplPage].id, { components: arr }); }
@@ -1168,6 +1200,23 @@ export default function Dashboard() {
                             updPage(tpl.pages[tplPage].id, { components: arr });
                             notify("위젯 복제됨");
                           }}>📋 복제</button>
+                        </div>
+                        <div className="flex gap-1 items-center text-[clamp(12px,1.5vw,14px)] text-gray-600">
+                          <span>배치:</span>
+                          <input className="min-h-[48px] border rounded-lg px-2 w-20" placeholder="위 여백" value={String(c.props.mt ?? 0)}
+                            onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { mt: e.target.value })} aria-label="위쪽 여백(px)" />
+                          <select className="min-h-[48px] border rounded-lg px-2" value={String(c.props.align ?? "")}
+                            onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { align: e.target.value })} aria-label="정렬">
+                            <option value="">늘리기</option>
+                            <option value="left">왼쪽</option>
+                            <option value="center">가운데</option>
+                            <option value="right">오른쪽</option>
+                          </select>
+                          <select className="min-h-[48px] border rounded-lg px-2" value={String(c.props.w ?? "full")}
+                            onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { w: e.target.value })} aria-label="너비">
+                            <option value="full">전체 너비</option>
+                            <option value="auto">내용 너비</option>
+                          </select>
                         </div>
                         {c.type === "text" && (<>
                           <input className={input} placeholder="내용" value={String(c.props.content ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { content: e.target.value })} />
