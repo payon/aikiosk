@@ -45,9 +45,13 @@ export default function KioskPage() {
           body: JSON.stringify({ uuid: id, screen: `${window.innerWidth}x${window.innerHeight}` })
         }).catch(() => {});
         if (st.data.status === "approved") {
-          const target = st.data.assignedSlug || "all";
+          const target = (st.data.assignedSlug || "").trim() || "all";
           if (target === "all") {
             router.replace("/");
+            return;
+          }
+          if (target.startsWith("t:")) {
+            router.replace(`/t/${target.slice(2)}`);
             return;
           }
           if (target.startsWith("cat:")) {

@@ -139,6 +139,8 @@ let store = [
 ];
 let templatesMem = [];
 let eventsMem = [];
+let devicesMem = [];
+let datasetsMem = [];
 // 인메모리 권한 (DB 없을 때 CRUD 시연용). seed-admin은 전체, demo-user는 library만.
 let permMem = [{ email: "user@rustkorea.cloud", slug: "library", accessLevel: "VIEW" }];
 let auditMem = [];
@@ -201,6 +203,7 @@ function withLinks(row) {
   return { ...row, links: normLinks(row.links) };
 }
 try {
+  console.log("[persist] trying", DATA_FILE);
   const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   if (Array.isArray(saved.store) && saved.store.length) store = saved.store;
   if (Array.isArray(saved.permMem)) permMem = saved.permMem;
@@ -209,9 +212,10 @@ try {
   if (Array.isArray(saved.usersMem) && saved.usersMem.length) usersMem = saved.usersMem;
   if (Array.isArray(saved.devicesMem)) devicesMem = saved.devicesMem;
   if (Array.isArray(saved.templatesMem)) templatesMem = saved.templatesMem;
+  if (Array.isArray(saved.datasetsMem)) datasetsMem = saved.datasetsMem;
   if (Array.isArray(saved.eventsMem)) eventsMem = saved.eventsMem;
   console.log("[persist] restored");
-} catch { /* 첫 실행 */ }
+} catch (e) { console.log("[persist] restore failed:", e.message); }
 
 async function getAllApps() {
   // 앱 + 게시된 템플릿(런처 그리드·카테고리·장비배정에 그대로 노출)
@@ -346,7 +350,7 @@ app.use("/subapps", express.static(path.join(__dirname, "subapps")));
 // (경로 상수는 파일 상단 store 선언부에서 정의 — TDZ 방지)
 function persist() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem, templatesMem, eventsMem: eventsMem.slice(-1000) }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem, templatesMem, datasetsMem, eventsMem: eventsMem.slice(-1000) }));
   } catch (e) { console.log("[persist] fail", e.message); }
 }
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: false }));
@@ -724,7 +728,7 @@ app.delete("/api/admin/permissions", requireAdmin, async (req, res) => {
 // ----- 장비 관리 (사이니지형 승인제) -----
 // 브라우저 PWA는 하드웨어 UUID를 읽을 수 없어 설치 시 발급한 UUID + 페어링 코드로 승인.
 // devicesMem: {id, uuid, name, code, status: pending|approved|rejected, lastSeen, createdAt}
-let devicesMem = [];
+// (let devicesMem은 상단 선언부에서 초기화 — TDZ 방지)
 function deviceCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
@@ -894,6 +898,87 @@ app.delete("/api/admin/devices", requireAdmin, async (req, res) => {  const { uu
   return ok(res, null);
 });
 
+// ----- 데이터셋 (엑셀/CSV 일괄등록 → 컴포넌트 바인딩용) -----
+// datasetsMem: {id, name, columns: string[], rows: Record[], createdAt}
+// (let datasetsMem은 상단 선언부에서 초기화 — TDZ 방지)
+function parseDataset(filename, buf) {
+  const XLSX = require("xlsx");
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".csv")) {
+    const text = buf.toString("utf8").replace(/^\uFEFF/, "");
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) return { columns: [], rows: [] };
+    const split = (l) => l.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+    const columns = split(lines[0]);
+    const rows = lines.slice(1, 501).map((l) => {
+      const v = split(l);
+      const o = {};
+      columns.forEach((c, i) => { o[c] = v[i] ?? ""; });
+      return o;
+    });
+    return { columns, rows };
+  }
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const arr = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  if (!arr.length) return { columns: [], rows: [] };
+  const columns = arr[0].map((c) => String(c));
+  const rows = arr.slice(1, 501).map((r) => {
+    const o = {};
+    columns.forEach((c, i) => { o[c] = r[i]; });
+    return o;
+  });
+  return { columns, rows };
+}
+
+// POST /api/admin/datasets/upload {name, filename, dataUrl} — ADMIN (.xlsx/.csv, 3MB)
+app.post("/api/admin/datasets/upload", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    name: z.string().min(1, "이름을 입력하세요").max(100),
+    filename: z.string().min(1).max(100),
+    dataUrl: z.string().min(1).max(6_000_000)
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  if (!/\.(xlsx|csv)$/i.test(parsed.data.filename)) return fail(res, "VALIDATION", ".xlsx/.csv만 허용", 400);
+  const m = parsed.data.dataUrl.match(/^data:[a-z/+.-]+;base64,(.+)$/);
+  if (!m) return fail(res, "VALIDATION", "dataUrl 형식 오류", 400);
+  const buf = Buffer.from(m[1], "base64");
+  if (buf.length > 3_000_000) return fail(res, "VALIDATION", "3MB 이하만 허용", 400);
+  let ds;
+  try {
+    ds = parseDataset(parsed.data.filename, buf);
+  } catch {
+    return fail(res, "VALIDATION", "파일 파싱 실패", 400);
+  }
+  const row = { id: `ds-${Date.now()}`, name: parsed.data.name, columns: ds.columns, rows: ds.rows, createdAt: new Date().toISOString() };
+  datasetsMem.push(row);
+  persist();
+  await audit(req.claims.userId, "dataset.upload", row.name, "success");
+  return ok(res, { ...row, rows: row.rows.slice(0, 5), total: row.rows.length }, 201);
+});
+
+// GET /api/admin/datasets — ADMIN (rows는 5개 미리보기 + total)
+app.get("/api/admin/datasets", requireAdmin, async (req, res) => {
+  return ok(res, datasetsMem.map((d) => ({ ...d, rows: d.rows.slice(0, 5), total: d.rows.length })));
+});
+
+// GET /api/datasets/:id — 공개 렌더용 (전체 행, no-store)
+app.get("/api/datasets/:id", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const d = datasetsMem.find((x) => x.id === req.params.id);
+  if (!d) return fail(res, "NOT_FOUND", "데이터셋 없음", 404);
+  return ok(res, d);
+});
+
+// DELETE /api/admin/datasets?id= — ADMIN
+app.delete("/api/admin/datasets", requireAdmin, async (req, res) => {
+  const { id } = req.query;
+  datasetsMem = datasetsMem.filter((x) => x.id !== String(id));
+  persist();
+  await audit(req.claims.userId, "dataset.delete", String(id), "success");
+  return ok(res, null);
+});
+
 // ----- 템플릿 (키오스크 화면 에디터용 JSON) -----
 // Template {id, slug, name, category, status: draft|published, version, pages, completePageId, updatedAt}
 // Page {id, title, components: [{id, type: text|button|image|video|nav, props}]}
@@ -950,9 +1035,12 @@ const TemplateSchema = z.object({
   slug: z.string().regex(/^[a-z0-9-]+$/, "슬러그는 영문 소문자·숫자·하이픈만").optional(),
   name: z.string().min(1, "이름을 입력하세요").max(100).optional(),
   category: z.string().max(50).optional(),
+  industry: z.string().max(30).optional(),
+  tags: z.string().max(200).optional(),
+  runMode: z.enum(["live", "demo"]).optional(),
   pages: z.array(z.object({
     id: z.string().min(1), title: z.string().max(100),
-    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav"]), props: z.record(z.any()).default({}) })).default([])
+    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid"]), props: z.record(z.any()).default({}) })).default([])
   })).max(30).optional(),
   completePageId: z.string().max(100).nullable().optional()
 });
@@ -1137,14 +1225,16 @@ app.post("/api/device/events", async (req, res) => {
     uuid: z.string().min(1).max(100),
     events: z.array(z.object({
       appSlug: z.string().max(100),
-      type: z.enum(["APP_START", "APP_COMPLETE", "ERROR"]),
-      at: z.string().max(30).optional()
+      type: z.enum(["APP_START", "APP_COMPLETE", "ERROR", "SURVEY"]),
+      at: z.string().max(30).optional(),
+      payload: z.record(z.any()).optional()
     })).max(50)
   }).safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   const rows = parsed.data.events.map((e) => ({
     id: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     deviceUuid: parsed.data.uuid, appSlug: e.appSlug, type: e.type,
+    payload: e.payload || null,
     at: e.at || new Date().toISOString()
   }));
   if (prisma) {
@@ -1174,27 +1264,30 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
   const perDayMap = new Map();
   for (let i = 0; i < days; i++) {
     const d = new Date(Date.now() - (days - 1 - i) * 86400000).toISOString().slice(0, 10);
-    perDayMap.set(d, { date: d, starts: 0, completes: 0 });
+    perDayMap.set(d, { date: d, starts: 0, completes: 0, surveys: 0 });
   }
   const perAppMap = new Map();
   const perDeviceMap = new Map();
   let errors = 0;
+  let surveys = 0;
   for (const e of events) {
     const dk = dayKey(e.at);
     if (perDayMap.has(dk)) {
       if (e.type === "APP_START") perDayMap.get(dk).starts++;
       if (e.type === "APP_COMPLETE") perDayMap.get(dk).completes++;
+      if (e.type === "SURVEY") { perDayMap.get(dk).surveys++; surveys++; }
     }
-    if (!perAppMap.has(e.appSlug)) perAppMap.set(e.appSlug, { slug: e.appSlug, starts: 0, completes: 0 });
+    if (!perAppMap.has(e.appSlug)) perAppMap.set(e.appSlug, { slug: e.appSlug, starts: 0, completes: 0, surveys: 0 });
     if (e.type === "APP_START") perAppMap.get(e.appSlug).starts++;
     if (e.type === "APP_COMPLETE") perAppMap.get(e.appSlug).completes++;
+    if (e.type === "SURVEY") perAppMap.get(e.appSlug).surveys++;
     if (!perDeviceMap.has(e.deviceUuid)) perDeviceMap.set(e.deviceUuid, { uuid: e.deviceUuid, starts: 0, completes: 0 });
     if (e.type === "APP_START") perDeviceMap.get(e.deviceUuid).starts++;
     if (e.type === "APP_COMPLETE") perDeviceMap.get(e.deviceUuid).completes++;
     if (e.type === "ERROR") errors++;
   }
   const perApp = [...perAppMap.values()].map((a) => ({ ...a, rate: a.starts ? Math.round((a.completes / a.starts) * 100) : 0 }));
-  return ok(res, { perDay: [...perDayMap.values()], perApp, perDevice: [...perDeviceMap.values()], errors });
+  return ok(res, { perDay: [...perDayMap.values()], perApp, perDevice: [...perDeviceMap.values()], errors, surveys });
 });
 
 // ----- Admin: users -----

@@ -23,9 +23,10 @@ interface AuditRow { id: string; actorId: string; action: string; target?: strin
 interface Perm { email: string; slug: string; accessLevel: string; }
 interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; }
 interface TplList { id: string; slug: string; name: string; category?: string; status: string; version: number; pageCount: number; updatedAt: string; }
-interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; }
+interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; industry?: string; tags?: string; runMode?: string; }
+interface DsList { id: string; name: string; columns: string[]; total: number; }
 interface TplPage { id: string; title: string; components: TplComp[]; }
-interface TplComp { id: string; type: string; props: Record<string, string | number>; }
+interface TplComp { id: string; type: string; props: Record<string, unknown>; }
 interface StatRow { slug?: string; uuid?: string; date?: string; starts: number; completes: number; rate?: number; }
 interface Stats { perDay: StatRow[]; perApp: StatRow[]; perDevice: StatRow[]; errors: number; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
@@ -49,6 +50,7 @@ export default function Dashboard() {
   const [newTpl, setNewTpl] = useState({ name: "", slug: "", category: "전체" });
   const [stats, setStats] = useState<Stats | null>(null);
   const [statDays, setStatDays] = useState(7);
+  const [dss, setDss] = useState<DsList[]>([]);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
@@ -144,6 +146,10 @@ export default function Dashboard() {
     fetch("/api/admin/templates").then(async (r) => {
       const j = await r.json();
       if (j.success) setTpls(j.data);
+    }).catch(() => {});
+    fetch("/api/admin/datasets").then(async (r) => {
+      const j = await r.json();
+      if (j.success) setDss(j.data);
     }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
@@ -344,7 +350,7 @@ export default function Dashboard() {
   function updPage(pageId: string, patch: Partial<TplPage>) {
     setTpl((cur) => (cur ? { ...cur, pages: cur.pages.map((p) => (p.id === pageId ? { ...p, ...patch } : p)) } : cur));
   }
-  function updComp(pageId: string, compId: string, props: Record<string, string | number>) {
+  function updComp(pageId: string, compId: string, props: Record<string, unknown>) {
     setTpl((cur) => (cur ? {
       ...cur,
       pages: cur.pages.map((p) => (p.id === pageId
@@ -720,7 +726,18 @@ export default function Dashboard() {
                         <optgroup label="개별 앱">
                           {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name}</option>)}
                         </optgroup>
+                        <optgroup label="템플릿">
+                          {tpls.filter((t) => t.status === "published").map((t) => <option key={t.id} value={`t:${t.slug}`}>{t.name} v{t.version}</option>)}
+                        </optgroup>
                       </select>
+                      {(() => {
+                        const slug = (d as Device & { assignedSlug?: string }).assignedSlug || "";
+                        if (slug.startsWith("t:")) {
+                          const t = tpls.find((x) => x.slug === slug.slice(2));
+                          return t ? <span className="block text-[11px] text-gray-500">{t.name} v{t.version}</span> : null;
+                        }
+                        return null;
+                      })()}
                     </td>
                     <td className="p-2 whitespace-nowrap text-gray-500">{d.lastSeen ? new Date(d.lastSeen).toLocaleString("ko-KR") : "-"}</td>
                     <td className="p-2">{d.storagePct !== undefined && d.storagePct >= 0 ? `${d.storagePct}%` : "-"}</td>
@@ -772,6 +789,47 @@ export default function Dashboard() {
         {tab === "templates" && (
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">템플릿 (키오스크 화면 에디터)</h1>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">데이터셋 (엑셀 일괄등록)</h2>
+            <div className="bg-white border rounded-2xl p-4 mb-4 grid gap-2">
+              <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500">.xlsx/.csv 첫 행 헤더 (이름·가격·이미지·카테고리·재고), 500행까지. 상품그리드에서 바인딩.</p>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target as HTMLFormElement);
+                const f = fd.get("file") as File | null;
+                if (!f) return;
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                  const r = new FileReader();
+                  r.onload = () => resolve(r.result as string);
+                  r.onerror = reject;
+                  r.readAsDataURL(f);
+                });
+                const r = await fetch("/api/admin/datasets/upload", {
+                  method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ name: String(fd.get("name") || f.name), filename: f.name, dataUrl })
+                });
+                const j = await r.json().catch(() => ({}));
+                result(r.ok && j.success, `데이터셋 등록됨 (${j.data?.total ?? 0}행)`, j);
+                if (r.ok) { (e.target as HTMLFormElement).reset(); load(); }
+              }} className="flex flex-wrap gap-2">
+                <input name="name" className={`${input} flex-1 min-w-[120px]`} placeholder="데이터셋 이름" aria-label="데이터셋 이름" />
+                <input name="file" type="file" accept=".xlsx,.csv" className={`${input} pt-2 flex-1 min-w-[160px]`} aria-label="엑셀/CSV 파일" />
+                <button className={primary}>업로드</button>
+              </form>
+              <ul className="grid gap-1">
+                {dss.map((d) => (
+                  <li key={d.id} className="flex items-center gap-2 text-[clamp(13px,2vw,15px)] border-b py-2">
+                    <span className="flex-1"><b>{d.name}</b> — {d.total}행 · {d.columns.join(", ")}</span>
+                    <button className={btn} onClick={async () => {
+                      if (!confirm("데이터셋을 삭제할까요?")) return;
+                      const r = await fetch(`/api/admin/datasets?id=${d.id}`, { method: "DELETE" });
+                      const j = await r.json().catch(() => ({}));
+                      result(r.ok && j.success, "데이터셋 삭제됨", j);
+                      if (r.ok) load();
+                    }}>삭제</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
             <form onSubmit={createTpl} className="flex flex-wrap gap-2 max-w-2xl bg-white border rounded-2xl p-4 mb-4">
               <input className={`${input} flex-1 min-w-[120px]`} placeholder="이름" value={newTpl.name} onChange={(e) => setNewTpl({ ...newTpl, name: e.target.value })} aria-label="새 템플릿 이름" />
               <input className={`${input} flex-1 min-w-[120px]`} placeholder="슬러그 (비우면 자동)" value={newTpl.slug} onChange={(e) => setNewTpl({ ...newTpl, slug: e.target.value })} aria-label="새 템플릿 슬러그" />
@@ -812,6 +870,17 @@ export default function Dashboard() {
                       <option value="">없음</option>
                       {tpl.pages.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
                     </select></label>
+                  <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">산업군
+                    <select className={input} value={tpl.industry || ""} onChange={(e) => updTpl({ industry: e.target.value })} aria-label="산업군">
+                      {["", "EDUCATION", "CAFE", "LIBRARY", "HEALTH", "TRANSPORT", "PUBLIC"].map((v) => <option key={v} value={v}>{v || "미지정"}</option>)}
+                    </select></label>
+                  <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">태그 (쉼표 구분)
+                    <input className={input} value={tpl.tags || ""} onChange={(e) => updTpl({ tags: e.target.value })} /></label>
+                  <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">실행 모드
+                    <select className={input} value={tpl.runMode || "live"} onChange={(e) => updTpl({ runMode: e.target.value })} aria-label="실행 모드">
+                      <option value="live">실서비스</option>
+                      <option value="demo">데모</option>
+                    </select></label>
                 </div>
                 {(tpl.versions || []).length > 0 && (
                   <div className="text-[clamp(13px,2vw,15px)]">버전: {(tpl.versions || []).map((v) => (
@@ -841,18 +910,25 @@ export default function Dashboard() {
                         updTpl({ pages: ps }); setTplPage(0);
                       }}>페이지 삭제</button>
                     </div>
-                    {(["text", "button", "image", "video", "nav"] as const).map((t) => (
+                    {(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid"] as const).map((t) => (
                       <button key={t} className={btn} onClick={() => {
                         const id = `c${Date.now()}`;
-                        const defaults: Record<string, Record<string, string | number>> = {
+                        const defaults: Record<string, Record<string, string | number | unknown[]>> = {
                           text: { content: "새 텍스트", size: 20, color: "#111111", align: "left", tts: "" },
-                          button: { label: "새 버튼", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "", tts: "" },
+                          button: { label: "새 버튼", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "", tts: "", actions: [] },
                           image: { src: "/logo.svg", alt: "", height: 0 },
-                          video: { src: "" },
-                          nav: { label: "이동", target: "/" }
+                          video: { src: "", subtitle: "" },
+                          nav: { label: "이동", target: "/" },
+                          appbar: { title: "제목", bg: "#0d9488", color: "#FFFFFF", size: 20 },
+                          progress: { label: "진행률", value: 30, max: 100, bg: "#0d9488" },
+                          ticker: { text: "공지사항", bg: "#111111", color: "#FFFFFF", size: 15 },
+                          quiz: { question: "질문", options: ["선택1", "선택2"], answer: 0 },
+                          survey: { question: "오늘 교육이 도움이 되셨나요?", appSlug: "" },
+                          numpad: { label: "숫자를 입력하세요", target: "" },
+                          productgrid: { datasetId: "", titleField: "이름", priceField: "가격", imageField: "이미지", columns: 2 }
                         };
                         updPage(tpl.pages[tplPage].id, { components: [...tpl.pages[tplPage].components, { id, type: t, props: defaults[t] }] });
-                      }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : "내비"}</button>
+                      }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : "상품그리드"}</button>
                     ))}
                     {tpl.pages[tplPage].components.map((c, ci) => (
                       <div key={c.id} className="border rounded-lg p-2 grid gap-1">
@@ -892,13 +968,90 @@ export default function Dashboard() {
                           <input className={input} placeholder="이미지 URL (/uploads/… 또는 https://…)" value={String(c.props.src ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { src: e.target.value })} />
                           <input className={input} placeholder="대체 텍스트" value={String(c.props.alt ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { alt: e.target.value })} />
                         </>)}
-                        {c.type === "video" && (
+                        {c.type === "video" && (<>
                           <input className={input} placeholder="동영상 URL" value={String(c.props.src ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { src: e.target.value })} />
-                        )}
+                          <input className={input} placeholder="자막" value={String(c.props.subtitle ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { subtitle: e.target.value })} />
+                        </>)}
                         {c.type === "nav" && (<>
                           <input className={input} placeholder="라벨" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
                           <input className={input} placeholder="이동 대상 (/ 또는 /경로)" value={String(c.props.target ?? "/")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { target: e.target.value })} />
                         </>)}
+                        {c.type === "appbar" && (<>
+                          <input className={input} placeholder="제목" value={String(c.props.title ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { title: e.target.value })} />
+                          <div className="flex gap-1">
+                            <input type="color" className="min-h-[48px] min-w-[48px]" value={String(c.props.bg ?? "#0d9488")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { bg: e.target.value })} aria-label="앱바 배경" />
+                            <input type="color" className="min-h-[48px] min-w-[48px]" value={String(c.props.color ?? "#FFFFFF")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { color: e.target.value })} aria-label="앱바 글자색" />
+                          </div>
+                        </>)}
+                        {c.type === "progress" && (<>
+                          <input className={input} placeholder="라벨" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
+                          <div className="flex gap-1">
+                            <input className={`${input} flex-1`} placeholder="값" value={String(c.props.value ?? 30)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { value: e.target.value })} aria-label="진행 값" />
+                            <input className={`${input} flex-1`} placeholder="최대" value={String(c.props.max ?? 100)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { max: e.target.value })} aria-label="최대값" />
+                          </div>
+                        </>)}
+                        {c.type === "ticker" && (<>
+                          <input className={input} placeholder="공지 내용" value={String(c.props.text ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { text: e.target.value })} />
+                        </>)}
+                        {c.type === "quiz" && (<>
+                          <input className={input} placeholder="질문" value={String(c.props.question ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { question: e.target.value })} />
+                          <input className={input} placeholder="선택지 (쉼표 구분, 최대 4)" value={Array.isArray(c.props.options) ? (c.props.options as string[]).join(",") : ""} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { options: e.target.value.split(",").map((s) => s.trim()).slice(0, 4) })} />
+                          <input className={input} placeholder="정답 번호 (0부터)" value={String(c.props.answer ?? 0)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { answer: e.target.value })} aria-label="정답 번호" />
+                        </>)}
+                        {c.type === "survey" && (
+                          <input className={input} placeholder="질문" value={String(c.props.question ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { question: e.target.value })} />
+                        )}
+                        {c.type === "numpad" && (<>
+                          <input className={input} placeholder="안내 문구" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
+                          <input className={input} placeholder="확인 후 이동 (페이지ID, 비우면 없음)" value={String(c.props.target ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { target: e.target.value })} />
+                        </>)}
+                        {c.type === "productgrid" && (<>
+                          <select className={input} value={String(c.props.datasetId ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { datasetId: e.target.value })} aria-label="데이터셋">
+                            <option value="">데이터셋 선택</option>
+                            {dss.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.total}행)</option>)}
+                          </select>
+                          <div className="flex gap-1">
+                            <input className={`${input} flex-1`} placeholder="제목 필드" value={String(c.props.titleField ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { titleField: e.target.value })} aria-label="제목 필드" />
+                            <input className={`${input} flex-1`} placeholder="가격 필드" value={String(c.props.priceField ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { priceField: e.target.value })} aria-label="가격 필드" />
+                            <input className={`${input} flex-1`} placeholder="이미지 필드" value={String(c.props.imageField ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { imageField: e.target.value })} aria-label="이미지 필드" />
+                          </div>
+                        </>)}
+                        {c.type === "button" && (
+                          <div className="grid gap-1 border rounded-lg p-2">
+                            <b className="text-[clamp(12px,1.5vw,14px)]">클릭 액션 체인 (순차 실행, 비우면 target 이동)</b>
+                            {((c.props.actions as { type: string; text?: string; target?: string; url?: string; key?: string; value?: string }[]) || []).map((a, ai) => (
+                              <div key={ai} className="flex gap-1">
+                                <select className={`${input} flex-1`} value={a.type} onChange={(e) => {
+                                  const arr = [...(((c.props.actions as unknown[]) || []) as { type: string }[])];
+                                  arr[ai] = { ...arr[ai], type: e.target.value };
+                                  updComp(tpl.pages[tplPage].id, c.id, { actions: arr });
+                                }} aria-label="액션 종류">
+                                  {["NAVIGATE", "POPUP", "TOAST", "SPEAK", "API_CALL", "STATE_UPDATE", "STATE_RESET"].map((t) => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                                <input className={`${input} flex-[2]`} placeholder="text/target/url/key (종류별)" value={String(a.text ?? a.target ?? a.url ?? a.key ?? "")}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    const arr = [...(((c.props.actions as unknown[]) || []) as Record<string, unknown>[])];
+                                    const cur = { ...(arr[ai] as Record<string, unknown>) };
+                                    if (a.type === "NAVIGATE") cur.target = v;
+                                    else if (a.type === "API_CALL") cur.url = v;
+                                    else if (a.type === "STATE_UPDATE") cur.key = v;
+                                    else cur.text = v;
+                                    arr[ai] = cur;
+                                    updComp(tpl.pages[tplPage].id, c.id, { actions: arr });
+                                  }} aria-label="액션 값" />
+                                <button type="button" className={btn} onClick={() => {
+                                  const arr = (((c.props.actions as unknown[]) || []) as unknown[]).filter((_, j) => j !== ai);
+                                  updComp(tpl.pages[tplPage].id, c.id, { actions: arr });
+                                }} aria-label="액션 삭제">✕</button>
+                              </div>
+                            ))}
+                            <button type="button" className={btn} onClick={() => {
+                              const arr = [...(((c.props.actions as unknown[]) || []) as unknown[]), { type: "NAVIGATE", target: "" }];
+                              updComp(tpl.pages[tplPage].id, c.id, { actions: arr });
+                            }}>+ 액션</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
