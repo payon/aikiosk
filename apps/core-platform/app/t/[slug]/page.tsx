@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import DOMPurify from "dompurify";
 
@@ -87,6 +87,26 @@ function Placed({ c, children }: { c: Comp; children: React.ReactNode }) {
   );
 }
 
+function HtmlBlock({ html }: { html: string }) {
+  // 살균은 html 변경 시 1회만 (대용량 HTML 반복 살균 방지)
+  const clean = useMemo(() => {
+    try {
+      return DOMPurify.sanitize(html, { FORBID_TAGS: ["script", "iframe", "object", "embed", "form"] });
+    } catch {
+      return "";
+    }
+  }, [html]);
+  if (clean.length > 500000) {
+    return <p style={{ fontSize: 14, color: "#b91c1c" }}>HTML이 너무 큽니다 (50만자 이하로 줄여주세요)</p>;
+  }
+  return (
+    <div style={{ margin: "8px 0", overflow: "hidden", borderRadius: 12 }}>
+      <div dangerouslySetInnerHTML={{ __html: clean }} />
+      <p style={{ fontSize: 12, color: "#888" }}>외부 HTML (스크립트 실행 차단됨)</p>
+    </div>
+  );
+}
+
 function CompView({ c, go, act, cartAdd }: {
   c: Comp; go: (target: string) => void;
   act: (actions: Action[]) => void; cartAdd: (name: string, price: number) => void;
@@ -154,16 +174,7 @@ function CompInner({ c, go, act, cartAdd }: {
     );
   }
   if (c.type === "html") {
-    let clean = "";
-    try {
-      clean = DOMPurify.sanitize(str(p.html), { FORBID_TAGS: ["script", "iframe", "object", "embed", "form"], FORBID_ATTR: ["on*"] });
-    } catch { clean = ""; }
-    return (
-      <div style={{ margin: "8px 0", overflow: "hidden", borderRadius: 12 }}>
-        <div dangerouslySetInnerHTML={{ __html: clean }} />
-        <p style={{ fontSize: 12, color: "#888" }}>외부 HTML (스크립트 실행 차단됨)</p>
-      </div>
-    );
+    return <HtmlBlock html={str(p.html)} />;
   }
   if (c.type === "nav") {
     const auto = str(p.w, "full") === "auto";

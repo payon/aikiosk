@@ -1,7 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PreviewGrid, type AppRegistry } from "@/components/PreviewGrid";
+
+function PvHtml({ html }: { html: string }) {
+  const clean = useMemo(() => html, [html]);
+  if (clean.length > 500000) return <div>HTML이 너무 큽니다 (50만자 이하)</div>;
+  return <div dangerouslySetInnerHTML={{ __html: clean }} />;
+}
 
 const LAUNCHER = process.env.NEXT_PUBLIC_LAUNCHER_URL || "/";
 type Tab = string;
@@ -1091,7 +1097,7 @@ export default function Dashboard() {
                         if (c.type === "button") return <button key={c.id} onClick={() => goPv(String(p.target || ""))} style={{ background: String(p.bg || "#C2410C"), color: String(p.color || "#fff"), borderRadius: 12, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", border: 0, width: "100%" }}>{String(p.label || "버튼")}</button>;
                         if (c.type === "image") return <div key={c.id} style={{ background: "#eee", borderRadius: 12, minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", color: "#888" }}>🖼 이미지</div>;
                         if (c.type === "video") return <div key={c.id} style={{ background: "#000", color: "#fff", borderRadius: 12, minHeight: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>▶ 동영상</div>;
-                        if (c.type === "html") return <div key={c.id} dangerouslySetInnerHTML={{ __html: String(p.html || "") }} />;
+                        if (c.type === "html") return <PvHtml key={c.id} html={String(p.html || "")} />;
                         if (c.type === "html") return <div key={c.id} style={{ border: "1px dashed #aaa", borderRadius: 10, padding: 10, color: "#666" }}>&lt;HTML&gt; 미리보기는 실제 화면에서 확인</div>;
                         if (c.type === "appbar") return <div key={c.id} style={{ background: String(p.bg || "#0d9488"), color: "#fff", borderRadius: 10, padding: 12, fontWeight: "bold" }}>{String(p.title || "제목")}</div>;
                         if (c.type === "quiz") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10 }}>❓ {String(p.question || "질문")}</div>;
