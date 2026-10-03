@@ -898,7 +898,7 @@ export default function Dashboard() {
             <ul className="grid gap-2 mb-6">
               {tpls.map((t) => (
                 <li key={t.id} className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-2 text-[clamp(14px,2vw,16px)]">
-                  <span className="flex-1 min-w-[200px]"><b>{t.name}</b> — {t.slug} · {t.status === "published" ? `게시됨 v${t.version}` : "초안"} · {t.pageCount}페이지</span>
+                  <span className="flex-1 min-w-[200px]"><b>{t.name}</b> — {t.slug} · {t.status === "published" ? `게시됨 v${t.version}` : t.status === "review" ? "검수중" : "초안"} · {t.pageCount}페이지</span>
                   <button className={btn} onClick={() => openTpl(t.id)}>열기</button>
                   <button className={btn} onClick={async () => {
                     const { ok, j } = await api("/api/admin/templates", {
@@ -937,8 +937,37 @@ export default function Dashboard() {
                   <span className="text-[clamp(12px,1.5vw,14px)] text-gray-500">{tpl.status} v{tpl.version}</span>
                   <a className="min-h-[48px] inline-flex items-center rounded-lg border px-3" href={`/t/${tpl.slug}`} target="_blank" rel="noreferrer">미리보기 ↗</a>
                   <button className={primary} onClick={() => saveTpl(tpl)}>저장</button>
-                  <button className={btn} onClick={() => publishTpl(tpl.id)}>게시 (접근성 검증)</button>
-                  {tpl.status === "published" && (
+                  {(tpl.status === "draft" || !tpl.status) && (<>
+                    <button className={btn} onClick={async () => {
+                      const r = await fetch("/api/admin/templates/stage", {
+                        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: tpl.id })
+                      });
+                      const j = await r.json().catch(() => ({}));
+                      result(r.ok && j.success, "스테이징됨 — 실제 화면 링크로 검수 후 게시하세요", j);
+                      if (r.ok) load();
+                    }}>스테이징 (검수용 공개)</button>
+                    <button className={btn} onClick={() => publishTpl(tpl.id)}>게시 (접근성 검증)</button>
+                  </>)}
+                  {tpl.status === "review" && (<>
+                    <button className={btn} onClick={() => publishTpl(tpl.id)}>게시 (접근성 검증)</button>
+                    <button className={btn} onClick={async () => {
+                      const r = await fetch("/api/admin/templates/unpublish", {
+                        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: tpl.id })
+                      });
+                      const j = await r.json().catch(() => ({}));
+                      result(r.ok && j.success, "초안으로 되돌림", j);
+                      if (r.ok) load();
+                    }}>초안으로</button>
+                  </>)}
+                  {tpl.status === "published" && (<>
+                    <button className={btn} onClick={async () => {
+                      const r = await fetch("/api/admin/templates/stage", {
+                        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: tpl.id })
+                      });
+                      const j = await r.json().catch(() => ({}));
+                      result(r.ok && j.success, "검수중으로 내림 (런처에서 숨김)", j);
+                      if (r.ok) load();
+                    }}>검수로 내리기</button>
                     <button className={btn} onClick={async () => {
                       const r = await fetch("/api/admin/templates/unpublish", {
                         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: tpl.id })
@@ -947,7 +976,7 @@ export default function Dashboard() {
                       result(r.ok && j.success, "게시 취소됨 (초안으로)", j);
                       if (r.ok) load();
                     }}>게시 취소</button>
-                  )}
+                  </>)}
                   {autoSaved && <span className="text-[clamp(12px,1.5vw,14px)] text-gray-500">자동 저장됨 {autoSaved}</span>}
                 </div>
                 <div className="grid gap-2 md:grid-cols-3">

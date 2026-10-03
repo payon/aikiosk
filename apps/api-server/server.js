@@ -1159,7 +1159,24 @@ app.post("/api/admin/templates/publish", requireAdmin, async (req, res) => {
   return ok(res, { ...templatePublic(t), warnings: v.warnings, versions: t.versions.map((x) => x.version) });
 });
 
-// POST /api/admin/templates/rollback {id, version} — 원클릭 롤백
+// POST /api/admin/templates/stage {id} — 검수용 스테이징 (게이트 없이, /t/슬러그에서만 확인, 런처 미노출)
+app.post("/api/admin/templates/stage", requireAdmin, async (req, res) => {
+  const { id } = req.body || {};
+  if (prisma) {
+    try {
+      const row = await prisma.template.update({ where: { id }, data: { status: "review" } });
+      await audit(req.claims.userId, "template.stage", row.slug, "success");
+      return ok(res, { status: "review" });
+    } catch { return fail(res, "NOT_FOUND", "템플릿 없음", 404); }
+  }
+  const t = templatesMem.find((x) => x.id === id);
+  if (!t) return fail(res, "NOT_FOUND", "템플릿 없음", 404);
+  t.status = "review";
+  t.updatedAt = new Date().toISOString();
+  persist();
+  await audit(req.claims.userId, "template.stage", t.slug, "success");
+  return ok(res, { status: "review" });
+});
 app.post("/api/admin/templates/rollback", requireAdmin, async (req, res) => {
   const { id, version } = req.body || {};
   if (prisma) {
@@ -1220,17 +1237,17 @@ app.delete("/api/admin/templates", requireAdmin, async (req, res) => {
   return ok(res, null);
 });
 
-// GET /api/templates/:slug — 공개 렌더용 (게시된 것만)
+// GET /api/templates/:slug — 공개 렌더용 (게시 + 검수중; 초안은 404)
 app.get("/api/templates/:slug", async (req, res) => {
   res.set("Cache-Control", "no-store");
   const find = async () => {
     if (prisma) {
       try {
         const row = await prisma.template.findUnique({ where: { slug: req.params.slug } });
-        if (row && row.status === "published") return { ...row, ...(JSON.parse(row.body || '{"pages":[]}')) };
+        if (row && (row.status === "published" || row.status === "review")) return { ...row, ...(JSON.parse(row.body || '{"pages":[]}')) };
       } catch { /* fallthrough */ }
     }
-    return templatesMem.find((x) => x.slug === req.params.slug && x.status === "published");
+    return templatesMem.find((x) => x.slug === req.params.slug && (x.status === "published" || x.status === "review"));
   };
   const t = await find();
   if (!t) return fail(res, "NOT_FOUND", "게시된 템플릿 없음", 404);

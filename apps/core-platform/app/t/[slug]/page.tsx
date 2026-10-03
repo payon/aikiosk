@@ -5,7 +5,7 @@ import DOMPurify from "dompurify";
 
 interface Comp { id: string; type: string; props: Record<string, unknown>; }
 interface Page { id: string; title: string; components: Comp[]; }
-interface Tpl { slug: string; name: string; pages: Page[]; completePageId?: string | null; version: number; }
+interface Tpl { slug: string; name: string; pages: Page[]; completePageId?: string | null; version: number; status?: string; }
 interface Action { type: string; [k: string]: unknown; }
 
 function str(v: unknown, fb = ""): string {
@@ -353,7 +353,8 @@ export default function TemplateView({ params }: { params: { slug: string } }) {
   if (err) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center gap-3 p-4">
-        <p>{err}</p>
+        <p>게시된 템플릿이 없습니다.</p>
+        <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500">초안 상태이거나 삭제된 경우입니다. 어드민 템플릿 탭에서 저장 → 게시를 눌러주세요.</p>
         <button onClick={() => router.push("/")} className="min-h-[48px] rounded-lg bg-orange-700 text-white px-4">런처로</button>
       </main>
     );
@@ -369,6 +370,7 @@ export default function TemplateView({ params }: { params: { slug: string } }) {
         <button onClick={() => router.push("/")} className="min-h-[48px] min-w-[48px]" aria-label="런처로">←</button>
         <b className="text-[clamp(16px,2vw,24px)]">{tpl.name} · {page.title}</b>
         <span className="ml-auto text-[clamp(12px,1.5vw,14px)] text-gray-400">v{tpl.version}</span>
+        {tpl.status === "review" && <span className="text-[clamp(12px,1.5vw,14px)] font-bold text-orange-700 border border-orange-300 rounded-full px-2">검수중(미게시)</span>}
         {cart.length > 0 && <span className="text-[clamp(12px,1.5vw,14px)] font-bold">🛒{cart.length} {total.toLocaleString()}원</span>}
       </header>
       <main className="flex-1 w-full max-w-[640px] mx-auto p-4 pb-10">
