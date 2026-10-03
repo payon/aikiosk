@@ -1043,7 +1043,7 @@ const TemplateSchema = z.object({
   runMode: z.enum(["live", "demo"]).optional(),
   pages: z.array(z.object({
     id: z.string().min(1), title: z.string().max(100),
-    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid"]), props: z.record(z.any()).default({}) })).default([])
+    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html"]), props: z.record(z.any()).default({}) })).default([])
   })).max(30).optional(),
   completePageId: z.string().max(100).nullable().optional()
 });

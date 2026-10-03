@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import DOMPurify from "dompurify";
 
 interface Comp { id: string; type: string; props: Record<string, unknown>; }
 interface Page { id: string; title: string; components: Comp[]; }
@@ -125,6 +126,18 @@ function CompView({ c, go, act, cartAdd }: {
         <video src={str(p.src)} controls playsInline preload="metadata"
           style={{ width: "100%", borderRadius: 12, background: "#000", minHeight: 200 }} />
         {str(p.subtitle) ? <p style={{ fontSize: 14, color: "#555" }}>자막: {str(p.subtitle)}</p> : null}
+      </div>
+    );
+  }
+  if (c.type === "html") {
+    let clean = "";
+    try {
+      clean = DOMPurify.sanitize(str(p.html), { FORBID_TAGS: ["script", "iframe", "object", "embed", "form"], FORBID_ATTR: ["on*"] });
+    } catch { clean = ""; }
+    return (
+      <div style={{ margin: "8px 0", overflow: "hidden", borderRadius: 12 }}>
+        <div dangerouslySetInnerHTML={{ __html: clean }} />
+        <p style={{ fontSize: 12, color: "#888" }}>외부 HTML (스크립트 실행 차단됨)</p>
       </div>
     );
   }

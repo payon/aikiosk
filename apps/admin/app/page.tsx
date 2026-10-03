@@ -930,6 +930,7 @@ export default function Dashboard() {
                         if (c.type === "button") return <div key={c.id} style={{ background: String(p.bg || "#C2410C"), color: String(p.color || "#fff"), borderRadius: 12, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>{String(p.label || "버튼")}</div>;
                         if (c.type === "image") return <div key={c.id} style={{ background: "#eee", borderRadius: 12, minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", color: "#888" }}>🖼 이미지</div>;
                         if (c.type === "video") return <div key={c.id} style={{ background: "#000", color: "#fff", borderRadius: 12, minHeight: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>▶ 동영상</div>;
+                        if (c.type === "html") return <div key={c.id} style={{ border: "1px dashed #aaa", borderRadius: 10, padding: 10, color: "#666" }}>&lt;HTML&gt; 미리보기는 실제 화면에서 확인</div>;
                         if (c.type === "appbar") return <div key={c.id} style={{ background: String(p.bg || "#0d9488"), color: "#fff", borderRadius: 10, padding: 12, fontWeight: "bold" }}>{String(p.title || "제목")}</div>;
                         if (c.type === "quiz") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10 }}>❓ {String(p.question || "질문")}</div>;
                         if (c.type === "survey") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10, textAlign: "center" }}>😊 😐 😞</div>;
@@ -965,7 +966,7 @@ export default function Dashboard() {
                         updTpl({ pages: ps }); setTplPage(0);
                       }}>페이지 삭제</button>
                     </div>
-                    {(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid"] as const).map((t) => (
+                    {(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html"] as const).map((t) => (
                       <button key={t} className={btn} onClick={() => {
                         const id = `c${Date.now()}`;
                         const defaults: Record<string, Record<string, string | number | unknown[]>> = {
@@ -973,6 +974,7 @@ export default function Dashboard() {
                           button: { label: "새 버튼", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "", tts: "", actions: [] },
                           image: { src: "/logo.svg", alt: "", height: 0 },
                           video: { src: "", subtitle: "" },
+                          html: { html: "<div style=\"padding:16px;background:#f5f5f5;border-radius:12px\">HTML을 입력하세요</div>" },
                           nav: { label: "이동", target: "/" },
                           appbar: { title: "제목", bg: "#0d9488", color: "#FFFFFF", size: 20 },
                           progress: { label: "진행률", value: 30, max: 100, bg: "#0d9488" },
@@ -983,7 +985,7 @@ export default function Dashboard() {
                           productgrid: { datasetId: "", titleField: "이름", priceField: "가격", imageField: "이미지", columns: 2 }
                         };
                         updPage(tpl.pages[tplPage].id, { components: [...tpl.pages[tplPage].components, { id, type: t, props: defaults[t] }] });
-                      }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : "상품그리드"}</button>
+                      }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : t === "html" ? "HTML" : "상품그리드"}</button>
                     ))}
                     {tpl.pages[tplPage].components.map((c, ci) => (
                       <div key={c.id} draggable
@@ -1041,6 +1043,9 @@ export default function Dashboard() {
                           <input className={input} placeholder="동영상 URL" value={String(c.props.src ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { src: e.target.value })} />
                           <input className={input} placeholder="자막" value={String(c.props.subtitle ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { subtitle: e.target.value })} />
                         </>)}
+                        {c.type === "html" && (
+                          <textarea className={`${input} min-h-[120px] font-mono`} placeholder="<div>HTML 입력 (script·form 실행 안됨)</div>" value={String(c.props.html ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { html: e.target.value })} aria-label="HTML 코드" />
+                        )}
                         {c.type === "nav" && (<>
                           <input className={input} placeholder="라벨" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
                           <input className={input} placeholder="이동 대상 (/ 또는 /경로)" value={String(c.props.target ?? "/")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { target: e.target.value })} />
