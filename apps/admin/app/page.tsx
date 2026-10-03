@@ -52,7 +52,31 @@ export default function Dashboard() {
   const [statDays, setStatDays] = useState(7);
   const [dss, setDss] = useState<DsList[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [dragType, setDragType] = useState<string | null>(null);
   const [previewW, setPreviewW] = useState(390);
+  const [selComp, setSelComp] = useState<string | null>(null);
+
+  function addComp(type: string) {
+    if (!tpl || tplPage >= tpl.pages.length) return;
+    const id = `c${Date.now()}`;
+    const defaults: Record<string, Record<string, unknown>> = {
+      text: { content: "새 텍스트", size: 20, color: "#111111", align: "left", tts: "" },
+      button: { label: "새 버튼", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "", tts: "", actions: [] },
+      image: { src: "/logo.svg", alt: "", height: 0 },
+      video: { src: "", subtitle: "" },
+      nav: { label: "이동", target: "/" },
+      appbar: { title: "제목", bg: "#0d9488", color: "#FFFFFF", size: 20 },
+      progress: { label: "진행률", value: 30, max: 100, bg: "#0d9488" },
+      ticker: { text: "공지사항", bg: "#111111", color: "#FFFFFF", size: 15 },
+      quiz: { question: "질문", options: ["선택1", "선택2"], answer: 0 },
+      survey: { question: "오늘 교육이 도움이 되셨나요?", appSlug: "" },
+      numpad: { label: "숫자를 입력하세요", target: "" },
+      productgrid: { datasetId: "", titleField: "이름", priceField: "가격", imageField: "이미지", columns: 2 },
+      html: { html: "<div>HTML</div>" }
+    };
+    updPage(tpl.pages[tplPage].id, { components: [...tpl.pages[tplPage].components, { id, type, props: defaults[type] || {} }] });
+    setSelComp(id);
+  }
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
@@ -846,6 +870,30 @@ export default function Dashboard() {
                 <li key={t.id} className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-2 text-[clamp(14px,2vw,16px)]">
                   <span className="flex-1 min-w-[200px]"><b>{t.name}</b> — {t.slug} · {t.status === "published" ? `게시됨 v${t.version}` : "초안"} · {t.pageCount}페이지</span>
                   <button className={btn} onClick={() => openTpl(t.id)}>열기</button>
+                  <button className={btn} onClick={async () => {
+                    const { ok, j } = await api("/api/admin/templates", {
+                      method: "POST", headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ name: `${t.name} (사본)`, category: t.category || "전체" })
+                    });
+                    if (!ok) { result(false, j.error?.message ?? "실패", j); return; }
+                    const nid = (j.data as { id: string }).id;
+                    // 원본 pages 읽기 (열려 있으면 로컬, 아니면 서버에서)
+                    let srcPages: { id: string; components: { id: string }[] }[] = (tpl && tpl.id === t.id) ? tpl.pages : [];
+                    if (!srcPages.length) {
+                      const full = await fetch("/api/admin/templates", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: t.id }) }).then((r) => r.json()).catch(() => null);
+                      if (full?.success && Array.isArray(full.data?.pages)) srcPages = full.data.pages;
+                    }
+                    srcPages = JSON.parse(JSON.stringify(srcPages));
+                    srcPages.forEach((pg, pi) => {
+                      pg.id = `p${Date.now()}${pi}`;
+                      (pg.components || []).forEach((c, ci) => { c.id = `c${Date.now()}${pi}${ci}`; });
+                    });
+                    await api("/api/admin/templates", {
+                      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: nid, pages: srcPages })
+                    });
+                    notify("템플릿 복제됨");
+                    load();
+                  }}>📋 복제</button>
                   <button className={btn} onClick={() => publishTpl(t.id)}>게시</button>
                   <button className={btn} onClick={() => removeTpl(t.id)}>삭제</button>
                 </li>
@@ -920,10 +968,24 @@ export default function Dashboard() {
                     }} />
                   </label>
                 </div>
-                <div className="overflow-x-auto bg-gray-100 rounded-xl p-3">
-                  <div className="mx-auto bg-white rounded-xl border" style={{ width: previewW, maxWidth: "none" }}>
+                <div className="overflow-x-auto bg-gray-100 rounded-xl p-3"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => { if (dragType) { addComp(dragType); setDragType(null); } }}
+                  onClick={(e) => {
+                    const box = e.currentTarget.querySelector(".pv-nodes");
+                    if (!box) return;
+                    const el = (e.target as HTMLElement).closest(".pv-nodes > *");
+                    const idx = Array.from(box.children).indexOf(el as Element);
+                    const comps = (tpl.pages[tplPage] || tpl.pages[0] || { components: [] }).components || [];
+                    if (idx >= 0 && comps[idx]) {
+                      setSelComp(comps[idx].id);
+                      document.getElementById(`ec-${comps[idx].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }}>
+                  <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500 mb-2">팔레트에서 드래그해서 놓으면 현재 페이지에 추가 · 클릭하면 편집기로 이동</p>
+                  <div className="pv-items mx-auto bg-white rounded-xl border grid gap-2 p-3" style={{ width: previewW, maxWidth: "none" }}>
                     <div className="px-3 min-h-[44px] flex items-center gap-2 border-b font-bold">{tpl.name}</div>
-                    <div className="p-3 grid gap-2">
+                    <div className="pv-nodes p-3 grid gap-2">
                       {((tpl.pages[tplPage] || tpl.pages[0] || { components: [] }).components || []).map((c) => {
                         const p = (c.props || {}) as Record<string, string | number | string[]>;
                         if (c.type === "text") return <div key={c.id} style={{ fontSize: Number(p.size) || 18 }}>{String(p.content || "텍스트")}</div>;
@@ -965,30 +1027,28 @@ export default function Dashboard() {
                         const ps = tpl.pages.filter((_, j) => j !== tplPage);
                         updTpl({ pages: ps }); setTplPage(0);
                       }}>페이지 삭제</button>
+                      <button className={btn} onClick={() => {
+                        const src = tpl.pages[tplPage];
+                        if (!src) return;
+                        const copy = JSON.parse(JSON.stringify(src));
+                        copy.id = `p${Date.now()}`;
+                        copy.title = `${src.title} (사본)`;
+                        (copy.components || []).forEach((c: { id: string }, i: number) => { c.id = `c${Date.now()}${i}`; });
+                        const ps = [...tpl.pages];
+                        ps.splice(tplPage + 1, 0, copy);
+                        updTpl({ pages: ps });
+                        notify("페이지 복제됨");
+                      }}>📋 페이지 복제</button>
                     </div>
                     {(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html"] as const).map((t) => (
-                      <button key={t} className={btn} onClick={() => {
-                        const id = `c${Date.now()}`;
-                        const defaults: Record<string, Record<string, string | number | unknown[]>> = {
-                          text: { content: "새 텍스트", size: 20, color: "#111111", align: "left", tts: "" },
-                          button: { label: "새 버튼", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "", tts: "", actions: [] },
-                          image: { src: "/logo.svg", alt: "", height: 0 },
-                          video: { src: "", subtitle: "" },
-                          html: { html: "<div style=\"padding:16px;background:#f5f5f5;border-radius:12px\">HTML을 입력하세요</div>" },
-                          nav: { label: "이동", target: "/" },
-                          appbar: { title: "제목", bg: "#0d9488", color: "#FFFFFF", size: 20 },
-                          progress: { label: "진행률", value: 30, max: 100, bg: "#0d9488" },
-                          ticker: { text: "공지사항", bg: "#111111", color: "#FFFFFF", size: 15 },
-                          quiz: { question: "질문", options: ["선택1", "선택2"], answer: 0 },
-                          survey: { question: "오늘 교육이 도움이 되셨나요?", appSlug: "" },
-                          numpad: { label: "숫자를 입력하세요", target: "" },
-                          productgrid: { datasetId: "", titleField: "이름", priceField: "가격", imageField: "이미지", columns: 2 }
-                        };
-                        updPage(tpl.pages[tplPage].id, { components: [...tpl.pages[tplPage].components, { id, type: t, props: defaults[t] }] });
-                      }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : t === "html" ? "HTML" : "상품그리드"}</button>
+                      <button key={t} draggable
+                        onDragStart={(e) => { setDragType(t); e.dataTransfer.effectAllowed = "copy"; }}
+                        onDragEnd={() => setDragType(null)}
+                        onClick={() => addComp(t)} className={btn}>
+                        + {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : t === "html" ? "HTML" : "상품그리드"}</button>
                     ))}
                     {tpl.pages[tplPage].components.map((c, ci) => (
-                      <div key={c.id} draggable
+                      <div key={c.id} id={`ec-${c.id}`} draggable
                         onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; }}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => {
@@ -1001,7 +1061,8 @@ export default function Dashboard() {
                           updPage(tpl.pages[tplPage].id, { components: arr });
                           setDragId(null);
                         }}
-                        className="border rounded-lg p-2 grid gap-1 bg-white" style={{ opacity: dragId === c.id ? 0.5 : 1 }}>
+                        className="border rounded-lg p-2 grid gap-1 bg-white" style={{ opacity: dragId === c.id ? 0.5 : 1, outline: selComp === c.id ? "3px solid #C2410C" : "none" }}
+                        onClick={() => setSelComp(c.id)}>
                         <div className="flex items-center gap-2">
                           <span className="cursor-move text-gray-400" title="드래그로 순서 변경">⠿</span>
                           <b className="text-[clamp(13px,2vw,15px)]">{c.type}</b>
@@ -1015,6 +1076,14 @@ export default function Dashboard() {
                             if (ci < arr.length - 1) { [arr[ci + 1], arr[ci]] = [arr[ci], arr[ci + 1]]; updPage(tpl.pages[tplPage].id, { components: arr }); }
                           }} aria-label="아래로">↓</button>
                           <button className={btn} onClick={() => updPage(tpl.pages[tplPage].id, { components: tpl.pages[tplPage].components.filter((x) => x.id !== c.id) })}>삭제</button>
+                          <button className={btn} onClick={() => {
+                            const copy = JSON.parse(JSON.stringify(c));
+                            copy.id = `c${Date.now()}`;
+                            const arr = [...tpl.pages[tplPage].components];
+                            arr.splice(ci + 1, 0, copy);
+                            updPage(tpl.pages[tplPage].id, { components: arr });
+                            notify("위젯 복제됨");
+                          }}>📋 복제</button>
                         </div>
                         {c.type === "text" && (<>
                           <input className={input} placeholder="내용" value={String(c.props.content ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { content: e.target.value })} />
