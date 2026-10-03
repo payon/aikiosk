@@ -21,14 +21,14 @@ const DEFAULT_MENU = [
 
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
-interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; }
+interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; requireApprovedDevice: boolean; }
 interface TplList { id: string; slug: string; name: string; category?: string; status: string; version: number; pageCount: number; updatedAt: string; }
 interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; industry?: string; tags?: string; runMode?: string; }
 interface DsList { id: string; name: string; columns: string[]; total: number; }
 interface TplPage { id: string; title: string; components: TplComp[]; }
 interface TplComp { id: string; type: string; props: Record<string, unknown>; }
 interface StatRow { slug?: string; uuid?: string; date?: string; starts: number; completes: number; rate?: number; }
-interface Stats { perDay: StatRow[]; perApp: StatRow[]; perDevice: StatRow[]; errors: number; }
+interface Stats { perDay: StatRow[]; perApp: StatRow[]; perDevice: StatRow[]; errors: number; surveys?: number; surveyDetail?: { appSlug: string; question: string; c5: number; c3: number; c1: number; n: number; avg: number }[]; recentErrors?: { deviceUuid: string; appSlug: string; at: string }[]; }
 interface AppUser { id: string; email: string; role: string; createdAt: string; }
 interface Device { id: string; uuid: string; name: string; code: string; status: string; lastSeen: string; createdAt: string; assignedSlug?: string; screen?: string; placement?: string; storagePct?: number; }
 
@@ -40,7 +40,7 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRegistry[]>([]);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true, pwaIconUrl: "", adminMenu: [] });
+  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true, pwaIconUrl: "", adminMenu: [], requireApprovedDevice: false });
   const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -51,6 +51,8 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [statDays, setStatDays] = useState(7);
   const [dss, setDss] = useState<DsList[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [previewW, setPreviewW] = useState(390);
   const [newUser, setNewUser] = useState({ email: "", password: "", role: "USER" });
   const [newCat, setNewCat] = useState("");
   const [auditFilter, setAuditFilter] = useState("");
@@ -132,7 +134,8 @@ export default function Dashboard() {
         gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(j.data.gridCols || {}) },
         showAppName: j.data.showAppName !== false,
         pwaIconUrl: j.data.pwaIconUrl ?? "",
-        adminMenu: Array.isArray(j.data.adminMenu) && j.data.adminMenu.length ? j.data.adminMenu : []
+        adminMenu: Array.isArray(j.data.adminMenu) && j.data.adminMenu.length ? j.data.adminMenu : [],
+        requireApprovedDevice: j.data.requireApprovedDevice === true
       });
     }).catch(() => {});
     fetch("/api/admin/users").then(async (r) => {
@@ -887,6 +890,58 @@ export default function Dashboard() {
                     <button key={v} className="border rounded-lg px-2 py-1 mr-1 min-h-[48px]" onClick={() => rollbackTpl(tpl.id, v)}>v{v}로 롤백</button>
                   ))}</div>
                 )}
+                <div className="flex gap-2 items-center flex-wrap">
+                  <b>미리보기</b>
+                  <select className={input} value={previewW} onChange={(e) => setPreviewW(Number(e.target.value))} aria-label="미리보기 너비">
+                    <option value={390}>모바일 390</option>
+                    <option value={768}>태블릿 768</option>
+                    <option value={1080}>키오스크 1080</option>
+                  </select>
+                  <a className="min-h-[48px] inline-flex items-center rounded-lg border px-3" href={`/t/${tpl.slug}`} target="_blank" rel="noreferrer">실제 화면 ↗</a>
+                  <button className={btn} onClick={() => {
+                    const blob = new Blob([JSON.stringify({ slug: tpl.slug, name: tpl.name, category: tpl.category, pages: tpl.pages, completePageId: tpl.completePageId }, null, 2)], { type: "application/json" });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${tpl.slug}.template.json`;
+                    a.click();
+                    notify("템플릿 내보냄");
+                  }}>내보내기</button>
+                  <label className={`${btn} cursor-pointer`}>가져오기
+                    <input type="file" accept="application/json" className="hidden" onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      try {
+                        const j = JSON.parse(await f.text());
+                        if (!Array.isArray(j.pages)) { notify("템플릿 JSON이 아닙니다", false); return; }
+                        updTpl({ pages: j.pages, completePageId: j.completePageId ?? null });
+                        notify("불러옴 — 저장 버튼을 누르세요");
+                      } catch { notify("파싱 실패", false); }
+                      e.target.value = "";
+                    }} />
+                  </label>
+                </div>
+                <div className="overflow-x-auto bg-gray-100 rounded-xl p-3">
+                  <div className="mx-auto bg-white rounded-xl border" style={{ width: previewW, maxWidth: "none" }}>
+                    <div className="px-3 min-h-[44px] flex items-center gap-2 border-b font-bold">{tpl.name}</div>
+                    <div className="p-3 grid gap-2">
+                      {((tpl.pages[tplPage] || tpl.pages[0] || { components: [] }).components || []).map((c) => {
+                        const p = (c.props || {}) as Record<string, string | number | string[]>;
+                        if (c.type === "text") return <div key={c.id} style={{ fontSize: Number(p.size) || 18 }}>{String(p.content || "텍스트")}</div>;
+                        if (c.type === "button") return <div key={c.id} style={{ background: String(p.bg || "#C2410C"), color: String(p.color || "#fff"), borderRadius: 12, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>{String(p.label || "버튼")}</div>;
+                        if (c.type === "image") return <div key={c.id} style={{ background: "#eee", borderRadius: 12, minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", color: "#888" }}>🖼 이미지</div>;
+                        if (c.type === "video") return <div key={c.id} style={{ background: "#000", color: "#fff", borderRadius: 12, minHeight: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>▶ 동영상</div>;
+                        if (c.type === "appbar") return <div key={c.id} style={{ background: String(p.bg || "#0d9488"), color: "#fff", borderRadius: 10, padding: 12, fontWeight: "bold" }}>{String(p.title || "제목")}</div>;
+                        if (c.type === "quiz") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10 }}>❓ {String(p.question || "질문")}</div>;
+                        if (c.type === "survey") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10, textAlign: "center" }}>😊 😐 😞</div>;
+                        if (c.type === "ticker") return <div key={c.id} style={{ background: "#111", color: "#fff", borderRadius: 8, padding: 8, overflow: "hidden", whiteSpace: "nowrap" }}>{String(p.text || "공지")}</div>;
+                        if (c.type === "numpad") return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10, textAlign: "center" }}>1 2 3<br />4 5 6<br />7 8 9</div>;
+                        if (c.type === "productgrid") return <div key={c.id} style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>{[1, 2, 3, 4].map((i) => <div key={i} style={{ background: "#f5f5f5", borderRadius: 8, minHeight: 70 }} />)}</div>;
+                        if (c.type === "progress") return <div key={c.id} style={{ height: 12, background: "#eee", borderRadius: 6 }}><div style={{ width: `${Number(p.value) || 30}%`, height: "100%", background: "#0d9488", borderRadius: 6 }} /></div>;
+                        return <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 10 }}>{String(p.label || c.type)}</div>;
+                      })}
+                    </div>
+                  </div>
+                </div>
                 <div className="flex gap-2 items-center">
                   <b>페이지 ({tpl.pages.length})</b>
                   <button className={btn} onClick={() => {
@@ -931,8 +986,22 @@ export default function Dashboard() {
                       }}>+ {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : "상품그리드"}</button>
                     ))}
                     {tpl.pages[tplPage].components.map((c, ci) => (
-                      <div key={c.id} className="border rounded-lg p-2 grid gap-1">
+                      <div key={c.id} draggable
+                        onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => {
+                          if (!dragId || dragId === c.id) return;
+                          const arr = [...tpl.pages[tplPage].components];
+                          const from = arr.findIndex((x) => x.id === dragId);
+                          if (from < 0) return;
+                          const [mv] = arr.splice(from, 1);
+                          arr.splice(ci, 0, mv);
+                          updPage(tpl.pages[tplPage].id, { components: arr });
+                          setDragId(null);
+                        }}
+                        className="border rounded-lg p-2 grid gap-1 bg-white" style={{ opacity: dragId === c.id ? 0.5 : 1 }}>
                         <div className="flex items-center gap-2">
+                          <span className="cursor-move text-gray-400" title="드래그로 순서 변경">⠿</span>
                           <b className="text-[clamp(13px,2vw,15px)]">{c.type}</b>
                           <span className="flex-1" />
                           <button className={btn} onClick={() => {
@@ -1094,6 +1163,24 @@ export default function Dashboard() {
                   </li>
                 ))}
                 {(stats.perApp || []).length === 0 && <li className="text-gray-500">이벤트 없음 — 키오스크에서 템플릿을 실행하면 집계됩니다</li>}
+              </ul>
+              <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">설문 문항별 결과</h2>
+              <ul className="grid gap-2 mb-4">
+                {((stats as Stats & { surveyDetail?: { appSlug: string; question: string; c5: number; c3: number; c1: number; n: number; avg: number }[] }).surveyDetail || []).map((s, i) => (
+                  <li key={i} className="bg-white border rounded-lg p-3 text-[clamp(14px,2vw,16px)]">
+                    <b>{s.appSlug}</b> — {s.question}
+                    <span className="block text-gray-600">😊{s.c5} 😐{s.c3} 😞{s.c1} · 평균 {s.avg}점 · {s.n}건</span>
+                  </li>
+                ))}
+              </ul>
+              <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">최근 오류</h2>
+              <ul className="grid gap-2 mb-4">
+                {((stats as Stats & { recentErrors?: { deviceUuid: string; appSlug: string; at: string }[] }).recentErrors || []).map((e, i) => (
+                  <li key={i} className="bg-white border rounded-lg p-3 text-[clamp(12px,1.5vw,14px)]">
+                    <b className="text-red-700">오류</b> {e.appSlug} · <span className="font-mono">{String(e.deviceUuid).slice(0, 13)}…</span> · {new Date(e.at).toLocaleString("ko-KR")}
+                  </li>
+                ))}
+                {(((stats as Stats & { recentErrors?: unknown[] }).recentErrors) || []).length === 0 && <li className="text-gray-500">오류 없음</li>}
               </ul>
               <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">기기별</h2>
               <ul className="grid gap-2">
@@ -1265,6 +1352,14 @@ export default function Dashboard() {
                 const next = (settings.adminMenu.length ? settings.adminMenu : DEFAULT_MENU).map((m) => ({ ...m }));
                 saveSettings({ adminMenu: next }, "메뉴 이름 저장됨");
               }}>메뉴 이름 저장</button>
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">수집 보안</h2>
+            <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4">
+              <label className="flex items-center gap-2 min-h-[48px] text-[clamp(14px,2vw,16px)]">
+                <input type="checkbox" className="w-6 h-6" checked={settings.requireApprovedDevice}
+                  onChange={(e) => saveSettings({ requireApprovedDevice: e.target.checked }, e.target.checked ? "승인된 장비만 수집" : "전체 수집으로 변경")} />
+                승인된 장비의 이벤트만 수집 (미승인 차단)
+              </label>
             </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">허용 도메인 (앱 등록 Allowlist)</h2>
             <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4">

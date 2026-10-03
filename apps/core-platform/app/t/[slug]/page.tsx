@@ -28,11 +28,49 @@ function speak(text: string) {
 function sendEvent(slug: string, type: string, payload?: Record<string, unknown>) {
   try {
     const uuid = localStorage.getItem("rk_device_id") || "browser";
-    fetch("/api/device/events", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ uuid, events: [{ appSlug: slug, type, ...(payload ? { payload } : {}) }] })
-    }).catch(() => {});
+    const body = JSON.stringify({ uuid, events: [{ appSlug: slug, type, ...(payload ? { payload } : {}) }] });
+    const send = () =>
+      fetch("/api/device/events", {
+        method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true
+      }).then((r) => {
+        if (!r.ok) throw new Error("send fail");
+        flushQueue();
+      }).catch(() => {
+        // 오프라인 큐 (최대 200건, 복구 시 flush)
+        try {
+          const q = JSON.parse(localStorage.getItem("rk_queue") || "[]");
+          q.push({ uuid, body: JSON.parse(body), at: Date.now() });
+          localStorage.setItem("rk_queue", JSON.stringify(q.slice(-200)));
+        } catch { /* ignore */ }
+      });
+    if (navigator.onLine === false) {
+      try {
+        const q = JSON.parse(localStorage.getItem("rk_queue") || "[]");
+        q.push({ uuid, body: JSON.parse(body), at: Date.now() });
+        localStorage.setItem("rk_queue", JSON.stringify(q.slice(-200)));
+      } catch { /* ignore */ }
+      return;
+    }
+    send();
   } catch { /* ignore */ }
+}
+
+function flushQueue() {
+  try {
+    const q = JSON.parse(localStorage.getItem("rk_queue") || "[]") as { body: unknown }[];
+    if (!q.length) return;
+    localStorage.setItem("rk_queue", "[]");
+    for (const item of q.slice(0, 50)) {
+      fetch("/api/device/events", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(item.body), keepalive: true
+      }).catch(() => {});
+    }
+  } catch { /* ignore */ }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("online", flushQueue);
 }
 
 function CompView({ c, go, act, cartAdd }: {
@@ -158,7 +196,7 @@ function CompView({ c, go, act, cartAdd }: {
                 const uuid = localStorage.getItem("rk_device_id") || "browser";
                 fetch("/api/device/events", {
                   method: "POST", headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ uuid, events: [{ appSlug: str(p.appSlug, "survey"), type: "SURVEY", payload: { mood: m, score: s } }] })
+                  body: JSON.stringify({ uuid, events: [{ appSlug: str(p.appSlug, "survey"), type: "SURVEY", payload: { question: str(p.question, ""), mood: m, score: s } }] })
                 }).catch(() => {});
               } catch { /* ignore */ }
               act([{ type: "TOAST", text: "응답 감사합니다!" }]);

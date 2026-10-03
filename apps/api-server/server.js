@@ -176,7 +176,8 @@ let settingsMem = {
   backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "",
   gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 },
   showAppName: true, pwaIconUrl: "",
-  adminMenu: DEFAULT_ADMIN_MENU
+  adminMenu: DEFAULT_ADMIN_MENU,
+  requireApprovedDevice: false
 };
 // 인메모리 사용자 (DB 없을 때 CRUD 시연용, 비밀번호 bcrypt 해시)
 const bcryptSync = require("bcryptjs");
@@ -258,6 +259,8 @@ function publicSettings(s) {
     gridDensity: s.gridDensity || "comfortable",
     gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5, ...(s.gridCols || {}) },
     showAppName: s.showAppName !== false,
+    pwaIconUrl: s.pwaIconUrl || "",
+    requireApprovedDevice: s.requireApprovedDevice === true,
     pwaIconUrl: s.pwaIconUrl || "",
     adminMenu: mergeMenu(Array.isArray(s.adminMenu) && s.adminMenu.length ? s.adminMenu : DEFAULT_ADMIN_MENU)
   };
@@ -1231,6 +1234,23 @@ app.post("/api/device/events", async (req, res) => {
     })).max(50)
   }).safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  // 분당 60건 rate limit (어뷰징 방지)
+  if (!checkLimit(`ev:${parsed.data.uuid}`, 60, 60000)) return fail(res, "RATE_LIMIT", "Too many events", 429);
+  // 승인제 토글: 승인된 장비만 수집
+  const s = await getSettings();
+  if (s.requireApprovedDevice) {
+    let approved = false;
+    if (prisma) {
+      try {
+        const d = await prisma.device.findUnique({ where: { uuid: parsed.data.uuid } });
+        approved = !!d && d.status === "approved";
+      } catch { /* fallthrough */ }
+    } else {
+      const d = devicesMem.find((x) => x.uuid === parsed.data.uuid);
+      approved = !!d && d.status === "approved";
+    }
+    if (!approved) return fail(res, "FORBIDDEN", "미승인 장비", 403);
+  }
   const rows = parsed.data.events.map((e) => ({
     id: `e-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     deviceUuid: parsed.data.uuid, appSlug: e.appSlug, type: e.type,
@@ -1268,6 +1288,8 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
   }
   const perAppMap = new Map();
   const perDeviceMap = new Map();
+  const surveyMap = new Map();
+  const recentErrors = [];
   let errors = 0;
   let surveys = 0;
   for (const e of events) {
@@ -1280,14 +1302,29 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
     if (!perAppMap.has(e.appSlug)) perAppMap.set(e.appSlug, { slug: e.appSlug, starts: 0, completes: 0, surveys: 0 });
     if (e.type === "APP_START") perAppMap.get(e.appSlug).starts++;
     if (e.type === "APP_COMPLETE") perAppMap.get(e.appSlug).completes++;
-    if (e.type === "SURVEY") perAppMap.get(e.appSlug).surveys++;
+    if (e.type === "SURVEY") {
+      perAppMap.get(e.appSlug).surveys++;
+      const q = (e.payload && e.payload.question) || e.appSlug;
+      const key = `${e.appSlug}|||${q}`;
+      if (!surveyMap.has(key)) surveyMap.set(key, { appSlug: e.appSlug, question: String(q).slice(0, 80), c5: 0, c3: 0, c1: 0, n: 0 });
+      const sc = Number(e.payload && e.payload.score);
+      const row = surveyMap.get(key);
+      row.n++;
+      if (sc === 5) row.c5++; else if (sc === 3) row.c3++; else if (sc === 1) row.c1++;
+    }
+    if (e.type === "ERROR") {
+      errors++;
+      if (recentErrors.length < 20) recentErrors.unshift({ deviceUuid: e.deviceUuid, appSlug: e.appSlug, at: e.at, payload: e.payload || null });
+    }
     if (!perDeviceMap.has(e.deviceUuid)) perDeviceMap.set(e.deviceUuid, { uuid: e.deviceUuid, starts: 0, completes: 0 });
     if (e.type === "APP_START") perDeviceMap.get(e.deviceUuid).starts++;
     if (e.type === "APP_COMPLETE") perDeviceMap.get(e.deviceUuid).completes++;
-    if (e.type === "ERROR") errors++;
   }
   const perApp = [...perAppMap.values()].map((a) => ({ ...a, rate: a.starts ? Math.round((a.completes / a.starts) * 100) : 0 }));
-  return ok(res, { perDay: [...perDayMap.values()], perApp, perDevice: [...perDeviceMap.values()], errors, surveys });
+  const surveyDetail = [...surveyMap.values()].map((r) => ({
+    ...r, avg: r.n ? Math.round(((r.c5 * 5 + r.c3 * 3 + r.c1 * 1) / r.n) * 10) / 10 : 0
+  }));
+  return ok(res, { perDay: [...perDayMap.values()], perApp, perDevice: [...perDeviceMap.values()], errors, surveys, surveyDetail, recentErrors });
 });
 
 // ----- Admin: users -----
@@ -1403,6 +1440,7 @@ const SettingsSchema = z.object({
   gridCols: GridColsSchema.partial().optional(),
   showAppName: z.boolean().optional(),
   pwaIconUrl: z.string().max(500).optional(),
+  requireApprovedDevice: z.boolean().optional(),
   adminMenu: z.array(z.object({ id: z.string().min(1).max(30), label: z.string().min(1).max(30) })).max(20).optional(),
   allowedDomains: z.array(z.string().max(100)).max(50).optional().refine(
     (v) => !v || !v.some((d) => ["169.254.169.254", "0.0.0.0", "localhost", "127.0.0.1", "::1"].includes(d.trim())),

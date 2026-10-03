@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AppGrid, type GridConfig } from "@/components/AppGrid";
+import { PwaActions } from "@/components/PwaActions";
 import type { AppRegistry } from "@/types/app";
 
 interface Props {
@@ -106,6 +107,7 @@ export function LauncherClient({ initialApps, initialCats, announcement, grid, i
           }}
         />
       )}
+      <PwaActions />
     </>
   );
 }
