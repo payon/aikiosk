@@ -1184,7 +1184,24 @@ app.post("/api/admin/templates/rollback", requireAdmin, async (req, res) => {
   return ok(res, { rolledBack: Number(version) });
 });
 
-// DELETE /api/admin/templates?id= — ADMIN
+// POST /api/admin/templates/unpublish {id} — 게시 취소 (버전 유지)
+app.post("/api/admin/templates/unpublish", requireAdmin, async (req, res) => {
+  const { id } = req.body || {};
+  if (prisma) {
+    try {
+      const row = await prisma.template.update({ where: { id }, data: { status: "draft" } });
+      await audit(req.claims.userId, "template.unpublish", row.slug, "success");
+      return ok(res, { status: "draft" });
+    } catch { return fail(res, "NOT_FOUND", "템플릿 없음", 404); }
+  }
+  const t = templatesMem.find((x) => x.id === id);
+  if (!t) return fail(res, "NOT_FOUND", "템플릿 없음", 404);
+  t.status = "draft";
+  t.updatedAt = new Date().toISOString();
+  persist();
+  await audit(req.claims.userId, "template.unpublish", t.slug, "success");
+  return ok(res, { status: "draft" });
+});
 app.delete("/api/admin/templates", requireAdmin, async (req, res) => {
   const { id } = req.query;
   if (!id) return fail(res, "VALIDATION", "id required", 400);

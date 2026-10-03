@@ -56,6 +56,27 @@ export default function Dashboard() {
   const [previewW, setPreviewW] = useState(390);
   const [pvIdx, setPvIdx] = useState(0);
   const [selComp, setSelComp] = useState<string | null>(null);
+  const [autoSaved, setAutoSaved] = useState("");
+
+  // 자동 저장 (2초 디바운스) — 저장 누락 방지
+  useEffect(() => {
+    if (!tpl || !tpl.id) return;
+    const t = setTimeout(async () => {
+      const r = await fetch("/api/admin/templates", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: tpl.id, name: tpl.name, category: tpl.category, industry: tpl.industry || "", tags: tpl.tags || "", runMode: tpl.runMode || "live", pages: tpl.pages, completePageId: tpl.completePageId ?? null })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.success) {
+        setAutoSaved(new Date().toLocaleTimeString("ko-KR"));
+        load();
+      } else {
+        notify(j.error?.message ?? "자동 저장 실패", false);
+      }
+    }, 2000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tpl ? JSON.stringify([tpl.name, tpl.category, tpl.pages, tpl.completePageId, tpl.industry, tpl.tags, tpl.runMode]) : ""] as unknown as [string]);
 
   function addComp(type: string) {
     if (!tpl || tplPage >= tpl.pages.length) return;
@@ -917,6 +938,17 @@ export default function Dashboard() {
                   <a className="min-h-[48px] inline-flex items-center rounded-lg border px-3" href={`/t/${tpl.slug}`} target="_blank" rel="noreferrer">미리보기 ↗</a>
                   <button className={primary} onClick={() => saveTpl(tpl)}>저장</button>
                   <button className={btn} onClick={() => publishTpl(tpl.id)}>게시 (접근성 검증)</button>
+                  {tpl.status === "published" && (
+                    <button className={btn} onClick={async () => {
+                      const r = await fetch("/api/admin/templates/unpublish", {
+                        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: tpl.id })
+                      });
+                      const j = await r.json().catch(() => ({}));
+                      result(r.ok && j.success, "게시 취소됨 (초안으로)", j);
+                      if (r.ok) load();
+                    }}>게시 취소</button>
+                  )}
+                  {autoSaved && <span className="text-[clamp(12px,1.5vw,14px)] text-gray-500">자동 저장됨 {autoSaved}</span>}
                 </div>
                 <div className="grid gap-2 md:grid-cols-3">
                   <label className="grid gap-1 text-[clamp(13px,2vw,15px)]">이름
@@ -1033,6 +1065,7 @@ export default function Dashboard() {
                     const n = tpl.pages.length + 1;
                     updTpl({ pages: [...tpl.pages, { id: `p${Date.now()}`, title: `화면${n}`, components: [] }] });
                   }}>+ 페이지</button>
+                  {tpl.pages.length === 0 && <span className="text-[clamp(13px,2vw,15px)] text-red-600">← 먼저 페이지를 추가하세요 (페이지 없으면 게시 불가)</span>}
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {tpl.pages.map((p, i) => (
