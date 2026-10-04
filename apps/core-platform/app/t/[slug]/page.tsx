@@ -185,6 +185,111 @@ function CompInner({ c, go, act, cartAdd }: {
       </button>
     );
   }
+  if (c.type === "calendar") {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth();
+    const first = new Date(y, m, 1).getDay();
+    const days = new Date(y, m + 1, 0).getDate();
+    const cells: (number | null)[] = [...Array(first).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+    while (cells.length % 7) cells.push(null);
+    return (
+      <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e5e7eb" }}>
+        <b style={{ fontSize: 17 }}>{y}년 {m + 1}월</b>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginTop: 8, textAlign: "center", fontSize: 14 }}>
+          {["일", "월", "화", "수", "목", "금", "토"].map((d) => <span key={d} style={{ color: "#888" }}>{d}</span>)}
+          {cells.map((d, i) => (
+            <span key={i} style={{
+              minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8,
+              background: d === now.getDate() ? "#0d9488" : "transparent", color: d === now.getDate() ? "#fff" : "#111"
+            }}>{d || ""}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (c.type === "weather") {
+    const [w, setW] = useState("불러오는 중…");
+    useEffect(() => {
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${num(p.lat, 37.56)}&longitude=${num(p.lon, 126.97)}&current=temperature_2m,weathercode&timezone=Asia%2FSeoul`)
+        .then((r) => r.json()).then((j) => {
+          if (j?.current) setW(`${j.current.temperature_2m}℃ (코드 ${j.current.weathercode})`);
+          else setW("조회 실패");
+        }).catch(() => setW("오프라인"));
+    }, []);
+    return (
+      <div style={{ background: "#EFF6FF", borderRadius: 12, padding: 14, fontSize: 17 }}>
+        🌤 {str(p.label, "현재 날씨")} — <b>{w}</b>
+      </div>
+    );
+  }
+  if (c.type === "chart") {
+    const [vals, setVals] = useState<{ label: string; value: number }[]>([]);
+    useEffect(() => {
+      const id = str(p.datasetId);
+      const lf = str(p.labelField, "이름"), vf = str(p.valueField, "가격");
+      if (!id) return;
+      fetch(`/api/datasets/${id}`).then((r) => r.json()).then((j) => {
+        if (j.success && Array.isArray(j.data.rows)) {
+          setVals(j.data.rows.slice(0, 12).map((r: Record<string, unknown>) => ({
+            label: String(r[lf] ?? "").slice(0, 8), value: Number(r[vf]) || 0
+          })));
+        }
+      }).catch(() => {});
+    }, []);
+    const max = Math.max(1, ...vals.map((v) => v.value));
+    return (
+      <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e5e7eb" }}>
+        <b style={{ fontSize: 16 }}>{str(p.title, "차트")}</b>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 140, marginTop: 8 }}>
+          {vals.map((v, i) => (
+            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+              <span style={{ fontSize: 11 }}>{v.value.toLocaleString()}</span>
+              <div style={{ width: "100%", background: "#0d9488", borderRadius: 4, height: `${Math.max(4, (v.value / max) * 100)}%` }} />
+              <span style={{ fontSize: 11 }}>{v.label}</span>
+            </div>
+          ))}
+          {!vals.length && <span style={{ fontSize: 14, color: "#888" }}>데이터셋을 연결하세요</span>}
+        </div>
+      </div>
+    );
+  }
+  if (c.type === "tabs") {
+    const items: string[] = Array.isArray(p.items) ? (p.items as string[]) : ["탭1", "탭2"];
+    const [ti, setTi] = useState(0);
+    return (
+      <div>
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>
+          {items.map((t, i) => (
+            <button key={i} onClick={() => setTi(i)}
+              style={{ minHeight: 48, padding: "0 16px", borderRadius: 999, border: "1px solid #ccc", whiteSpace: "nowrap",
+                background: i === ti ? "#111" : "#fff", color: i === ti ? "#fff" : "#111", fontWeight: i === ti ? "bold" : "normal" }}>
+              {t}
+            </button>
+          ))}
+        </div>
+        <p style={{ fontSize: 14, color: "#666" }}>{items[ti]} 내용 영역 (위젯으로 채우세요)</p>
+      </div>
+    );
+  }
+  if (c.type === "videolist") {
+    const urls: string[] = Array.isArray(p.urls) ? (p.urls as string[]).slice(0, 6) : [];
+    const [vi, setVi] = useState(0);
+    return (
+      <div style={{ background: "#000", borderRadius: 12, padding: 10 }}>
+        {urls[vi] ? (
+          <video src={urls[vi]} controls playsInline preload="metadata" style={{ width: "100%", borderRadius: 8, minHeight: 180 }} />
+        ) : <p style={{ color: "#fff", fontSize: 14 }}>동영상 URL을 등록하세요</p>}
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 8 }}>
+          {urls.map((u, i) => (
+            <button key={i} onClick={() => setVi(i)}
+              style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: i === vi ? "2px solid #fff" : "1px solid #555", color: "#fff", background: "transparent" }}>
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (c.type === "appbar") {
     return (
       <div style={{ background: str(p.bg, "#0d9488"), color: str(p.color, "#fff"), borderRadius: 12, padding: "14px 16px", fontSize: num(p.size, 20), fontWeight: "bold" }}>
@@ -358,7 +463,17 @@ export default function TemplateView({ params }: { params: { slug: string } }) {
         else if (a.type === "POPUP") setModal(String(a.text || ""));
         else if (a.type === "SPEAK") speak(String(a.text || ""));
         else if (a.type === "NAVIGATE") go(String(a.target || ""));
-        else if (a.type === "STATE_UPDATE") {
+        else if (a.type === "DRIVER_EXECUTE") {
+          const r = await fetch("/api/device/driver", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ uuid: localStorage.getItem("rk_device_id") || "browser", driverId: String(a.driverId || ""), command: String(a.command || "default") })
+          }).then((x) => x.json()).catch(() => null);
+          setToast(r?.success ? `장비 실행됨: ${r.data?.driver || ""}` : (r?.error?.message || "장비 실행 실패"));
+        } else if (a.type === "WAIT_HARDWARE") {
+          setToast(`${String(a.hardware || "장비")} 입력 대기 중… (15초 시뮬레이션)`);
+          await new Promise((r) => setTimeout(r, 3000));
+          setToast("입력 확인됨 (시뮬레이션)");
+        } else if (a.type === "STATE_UPDATE") {
           const k = String(a.key || "");
           if (k) {
             try {

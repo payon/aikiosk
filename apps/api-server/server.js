@@ -137,6 +137,8 @@ let store = [
   { id: "seed-2", name: "AI Platform", slug: "aiplatform", targetUrl: seedTarget("aiplatform"), iconUrl: "/icons/ai.svg", description: "AI 챗·솔루션 허브", displayOrder: 1, isActive: true, category: "AI" },
   { id: "seed-3", name: "헬스케어", slug: "healthcare", targetUrl: seedTarget("healthcare"), iconUrl: "/icons/health.svg", description: "건강 대시보드", displayOrder: 2, isActive: true, category: "헬스케어" }
 ];
+let driversMem = [];
+let outboxMem = [];
 let templatesMem = [];
 let eventsMem = [];
 let devicesMem = [];
@@ -177,7 +179,7 @@ let settingsMem = {
   gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 },
   showAppName: true, pwaIconUrl: "",
   adminMenu: DEFAULT_ADMIN_MENU,
-  requireApprovedDevice: false
+  requireApprovedDevice: false, notification: { webhookUrl: "" }
 };
 // 인메모리 사용자 (DB 없을 때 CRUD 시연용, 비밀번호 bcrypt 해시)
 const bcryptSync = require("bcryptjs");
@@ -214,6 +216,8 @@ try {
   if (Array.isArray(saved.devicesMem)) devicesMem = saved.devicesMem;
   if (Array.isArray(saved.templatesMem)) templatesMem = saved.templatesMem;
   if (Array.isArray(saved.datasetsMem)) datasetsMem = saved.datasetsMem;
+  if (Array.isArray(saved.driversMem)) driversMem = saved.driversMem;
+  if (Array.isArray(saved.outboxMem)) outboxMem = saved.outboxMem;
   if (Array.isArray(saved.eventsMem)) eventsMem = saved.eventsMem;
   console.log("[persist] restored");
 } catch (e) { console.log("[persist] restore failed:", e.message); }
@@ -261,6 +265,7 @@ function publicSettings(s) {
     showAppName: s.showAppName !== false,
     pwaIconUrl: s.pwaIconUrl || "",
     requireApprovedDevice: s.requireApprovedDevice === true,
+    notification: s.notification || { webhookUrl: "" },
     pwaIconUrl: s.pwaIconUrl || "",
     adminMenu: mergeMenu(Array.isArray(s.adminMenu) && s.adminMenu.length ? s.adminMenu : DEFAULT_ADMIN_MENU)
   };
@@ -353,7 +358,7 @@ app.use("/subapps", express.static(path.join(__dirname, "subapps")));
 // (경로 상수는 파일 상단 store 선언부에서 정의 — TDZ 방지)
 function persist() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem, templatesMem, datasetsMem, eventsMem: eventsMem.slice(-1000) }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ store, permMem, auditMem: auditMem.slice(0, 200), settingsMem, usersMem, devicesMem, templatesMem, datasetsMem, driversMem, outboxMem: outboxMem.slice(-50), eventsMem: eventsMem.slice(-1000) }));
   } catch (e) { console.log("[persist] fail", e.message); }
 }
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "30d", immutable: false }));
@@ -781,7 +786,7 @@ app.get("/api/device/status", async (req, res) => {
   }
   const d = devicesMem.find((x) => x.uuid === uuid);
   if (!d) return fail(res, "NOT_FOUND", "미등록 장비", 404);
-  return ok(res, { status: d.status, code: d.code, assignedSlug: d.assignedSlug || "" });
+  return ok(res, { status: d.status, code: d.code, assignedSlug: d.assignedSlug || "", schedule: d.schedule || "[]", pendingCommand: d.pendingCommand || "" });
 });
 
 // POST /api/device/heartbeat {uuid, screen?, storagePct?}
@@ -789,17 +794,30 @@ app.post("/api/device/heartbeat", async (req, res) => {
   const parsed = z.object({
     uuid: z.string().min(1).max(100),
     screen: z.string().max(20).optional(),
-    storagePct: z.number().int().min(0).max(100).optional()
+    storagePct: z.number().int().min(0).max(100).optional(),
+    ackCommand: z.string().max(200).optional()
   }).safeParse(req.body || {});
   if (!parsed.success) return fail(res, "VALIDATION", "uuid required", 400);
-  const { uuid, screen, storagePct } = parsed.data;
+  const { uuid, screen, storagePct, ackCommand } = parsed.data;
+  const clearCmd = (d) => {
+    if (ackCommand && d.pendingCommand === ackCommand) {
+      d.pendingCommand = "";
+      persist();
+      return true;
+    }
+    return false;
+  };
   if (prisma) {
     try {
       const data = { lastSeen: new Date() };
       if (screen) data.screen = screen;
       if (storagePct !== undefined) data.storagePct = storagePct;
-      await prisma.device.update({ where: { uuid }, data });
-      return ok(res, null);
+      const row = await prisma.device.update({ where: { uuid }, data });
+      if (ackCommand && row.pendingCommand === ackCommand) {
+        await prisma.device.update({ where: { uuid }, data: { pendingCommand: "" } });
+        return ok(res, { command: "", acked: true });
+      }
+      return ok(res, { command: row.pendingCommand || "" });
     } catch { /* fallthrough */ }
   }
   const d = devicesMem.find((x) => x.uuid === uuid);
@@ -807,9 +825,11 @@ app.post("/api/device/heartbeat", async (req, res) => {
     d.lastSeen = new Date().toISOString();
     if (screen) d.screen = screen;
     if (storagePct !== undefined) d.storagePct = storagePct;
+    const acked = clearCmd(d);
     persist();
+    return ok(res, { command: d.pendingCommand || "", acked });
   }
-  return ok(res, null);
+  return ok(res, { command: "" });
 });
 
 // ----- Admin: devices -----
@@ -830,7 +850,9 @@ app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
     name: z.string().max(100).optional(),
     assignedSlug: z.string().max(50).optional(),
     placement: z.string().max(100).optional(),
-    screen: z.string().max(20).optional()
+    screen: z.string().max(20).optional(),
+    schedule: z.string().max(2000).optional(),
+    pendingCommand: z.string().max(200).nullable().optional()
   }).safeParse(req.body);
   if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
   if (prisma) {
@@ -841,6 +863,8 @@ app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
       if (parsed.data.assignedSlug !== undefined) data.assignedSlug = parsed.data.assignedSlug;
       if (parsed.data.placement !== undefined) data.placement = parsed.data.placement;
       if (parsed.data.screen !== undefined) data.screen = parsed.data.screen;
+      if (parsed.data.schedule !== undefined) data.schedule = parsed.data.schedule;
+      if (parsed.data.pendingCommand !== undefined) data.pendingCommand = parsed.data.pendingCommand;
       const row = await prisma.device.update({ where: { uuid: parsed.data.uuid }, data });
       await audit(req.claims.userId, "device.update", parsed.data.uuid, "success");
       return ok(res, row);
@@ -855,6 +879,8 @@ app.patch("/api/admin/devices", requireAdmin, async (req, res) => {
   if (parsed.data.assignedSlug !== undefined) d.assignedSlug = parsed.data.assignedSlug;
   if (parsed.data.placement !== undefined) d.placement = parsed.data.placement;
   if (parsed.data.screen !== undefined) d.screen = parsed.data.screen;
+  if (parsed.data.schedule !== undefined) d.schedule = parsed.data.schedule;
+  if (parsed.data.pendingCommand !== undefined) d.pendingCommand = parsed.data.pendingCommand;
   persist();
   await audit(req.claims.userId, "device.update", d.uuid, "success");
   return ok(res, d);
@@ -1044,7 +1070,7 @@ const TemplateSchema = z.object({
   pages: z.array(z.object({
     id: z.string().min(1), title: z.string().max(100),
     bg: z.string().max(20).optional(), bgImage: z.string().max(500).optional(),
-    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html"]), props: z.record(z.any()).default({}) })).default([])
+    components: z.array(z.object({ id: z.string().min(1), type: z.enum(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html", "calendar", "weather", "chart", "tabs", "videolist"]), props: z.record(z.any()).default({}) })).default([])
   })).max(30).optional().refine(
     (v) => !v || JSON.stringify(v).length <= 2000000,
     { message: "템플릿 전체가 너무 큽니다 (2MB 이하, HTML은 50만자 이하 권장)" }
@@ -1303,6 +1329,11 @@ app.post("/api/device/events", async (req, res) => {
   }
   eventsMem.push(...rows);
   eventsMem = eventsMem.slice(-5000);
+  for (const e of rows) {
+    if (e.type === "ERROR") {
+      notifyOutbox("error", `${e.appSlug} 오류 (${e.deviceUuid})`).catch(() => {});
+    }
+  }
   return ok(res, { received: rows.length });
 });
 
@@ -1363,6 +1394,108 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
     ...r, avg: r.n ? Math.round(((r.c5 * 5 + r.c3 * 3 + r.c1 * 1) / r.n) * 10) / 10 : 0
   }));
   return ok(res, { perDay: [...perDayMap.values()], perApp, perDevice: [...perDeviceMap.values()], errors, surveys, surveyDetail, recentErrors });
+});
+
+// GET /api/admin/backup — 전체 백업 JSON 다운로드 (ADMIN, 비밀번호 해시 제외)
+app.get("/api/admin/backup", requireAdmin, async (req, res) => {
+  const dump = {
+    version: 1, at: new Date().toISOString(),
+    store: await getAllApps(),
+    settings: await getSettings(),
+    users: (await (async () => {
+      if (prisma) {
+        try {
+          const rows = await prisma.user.findMany();
+          return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, createdAt: u.createdAt }));
+        } catch { /* fallthrough */ }
+      }
+      return usersMem.map(publicUser);
+    })()),
+    perms: permMem,
+    devices: await (async () => {
+      if (prisma) {
+        try { return await prisma.device.findMany(); } catch { /* fallthrough */ }
+      }
+      return devicesMem;
+    })(),
+    templates: templatesMem,
+    datasets: datasetsMem
+  };
+  await audit(req.claims.userId, "backup.export", undefined, "success");
+  res.set("Content-Disposition", `attachment; filename="rk-backup-${Date.now()}.json"`);
+  return res.json({ success: true, data: dump });
+});
+
+// ----- 하드웨어 드라이버 레지스트리 (개발구현: 시뮬레이션 동작, 실장비는 별도 연동) -----
+// driversMem: {id, name, type: printer|payment|scanner|etc, mode: simulation|real, config}
+// (선언은 상단으로 이동)
+// POST /api/device/driver {uuid, driverId, command?} — 시뮬레이션 실행 + 감사 기록
+app.post("/api/device/driver", async (req, res) => {
+  const parsed = z.object({
+    uuid: z.string().min(1).max(100),
+    driverId: z.string().min(1).max(100),
+    command: z.string().max(500).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const drv = driversMem.find((x) => x.id === parsed.data.driverId);
+  if (!drv) return fail(res, "NOT_FOUND", "드라이버 없음", 404);
+  if (drv.mode === "real") {
+    await audit(parsed.data.uuid, "driver.execute", `${drv.name} (real — 미연동)`, "fail");
+    return fail(res, "NOT_IMPLEMENTED", "실장비 연동 필요 (시뮬레이션 모드로 전환하여 테스트)", 501);
+  }
+  await new Promise((r) => setTimeout(r, Number((drv.config && drv.config.delay_ms) || 300)));
+  await audit(parsed.data.uuid, "driver.execute", `${drv.name}:${parsed.data.command || "default"}`, "success");
+  return ok(res, { result: "simulated", driver: drv.name, command: parsed.data.command || "default" });
+});
+
+app.get("/api/admin/drivers", requireAdmin, async (req, res) => ok(res, driversMem));
+app.post("/api/admin/drivers", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    name: z.string().min(1).max(100),
+    type: z.enum(["printer", "payment", "scanner", "etc"]).default("etc"),
+    mode: z.enum(["simulation", "real"]).default("simulation"),
+    config: z.record(z.any()).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const row = { id: `drv-${Date.now()}`, ...parsed.data, config: parsed.data.config || {} };
+  driversMem.push(row);
+  persist();
+  await audit(req.claims.userId, "driver.create", row.name, "success");
+  return ok(res, row, 201);
+});
+app.delete("/api/admin/drivers", requireAdmin, async (req, res) => {
+  const { id } = req.query;
+  driversMem = driversMem.filter((x) => x.id !== String(id));
+  persist();
+  await audit(req.claims.userId, "driver.delete", String(id), "success");
+  return ok(res, null);
+});
+
+// ----- 알림 outbox (웹훅 미설정 시 내부 보관) -----
+// (선언은 상단으로 이동)
+async function notifyOutbox(kind, text) {
+  const row = { id: `n-${Date.now()}`, kind, text, at: new Date().toISOString() };
+  outboxMem.unshift(row);
+  outboxMem = outboxMem.slice(0, 50);
+  const url = (settingsMem.notification && settingsMem.notification.webhookUrl) || "";
+  if (url) {
+    try {
+      await fetch(url, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, text, at: row.at }), signal: AbortSignal.timeout(8000)
+      });
+      row.sent = true;
+    } catch {
+      row.sent = false;
+    }
+  }
+  persist();
+  return row;
+}
+app.get("/api/admin/outbox", requireAdmin, async (req, res) => ok(res, outboxMem));
+app.post("/api/admin/outbox/test", requireAdmin, async (req, res) => {
+  const row = await notifyOutbox("test", "알림 테스트 발송입니다");
+  return ok(res, row);
 });
 
 // ----- Admin: users -----
@@ -1479,6 +1612,7 @@ const SettingsSchema = z.object({
   showAppName: z.boolean().optional(),
   pwaIconUrl: z.string().max(500).optional(),
   requireApprovedDevice: z.boolean().optional(),
+  notification: z.object({ webhookUrl: z.string().max(500).optional() }).optional(),
   adminMenu: z.array(z.object({ id: z.string().min(1).max(30), label: z.string().min(1).max(30) })).max(20).optional(),
   allowedDomains: z.array(z.string().max(100)).max(50).optional().refine(
     (v) => !v || !v.some((d) => ["169.254.169.254", "0.0.0.0", "localhost", "127.0.0.1", "::1"].includes(d.trim())),
@@ -1521,4 +1655,7 @@ app.get("/api/admin/audit", requireAdmin, async (req, res) => {
   return ok(res, auditMem.slice(0, Math.min(Number(req.query.limit || 50), 200)));
 });
 
-app.listen(PORT, () => console.log(`api-server on :${PORT} (db=${!!prisma}, localApps=${LOCAL_APPS})`));
+app.listen(PORT, () => {
+  console.log(`api-server on :${PORT} (db=${!!prisma}, localApps=${LOCAL_APPS})`);
+  audit("system", "server.boot", `port:${PORT}`, "success");
+});

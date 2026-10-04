@@ -27,7 +27,7 @@ const DEFAULT_MENU = [
 
 interface AuditRow { id: string; actorId: string; action: string; target?: string | null; result: string; createdAt: string; }
 interface Perm { email: string; slug: string; accessLevel: string; }
-interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; requireApprovedDevice: boolean; }
+interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; requireApprovedDevice: boolean; notification?: { webhookUrl?: string }; }
 interface TplList { id: string; slug: string; name: string; category?: string; status: string; version: number; pageCount: number; updatedAt: string; }
 interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; industry?: string; tags?: string; runMode?: string; }
 interface DsList { id: string; name: string; columns: string[]; total: number; }
@@ -46,7 +46,7 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRegistry[]>([]);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true, pwaIconUrl: "", adminMenu: [], requireApprovedDevice: false });
+  const [settings, setSettings] = useState<Settings>({ platformName: "", primaryColor: "#C2410C", logoUrl: "/logo.svg", announcement: "", idleTimeoutMin: 3, menuOrder: [], backgroundType: "color", backgroundColor: "#FFF7ED", backgroundImage: "", allowedDomains: [], gridDensity: "comfortable", gridCols: { mobile: 2, tablet: 3, desktop: 4, kiosk: 5 }, showAppName: true, pwaIconUrl: "", adminMenu: [], requireApprovedDevice: false, notification: { webhookUrl: "" } });
   const [newDomain, setNewDomain] = useState("");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -57,6 +57,11 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [statDays, setStatDays] = useState(7);
   const [dss, setDss] = useState<DsList[]>([]);
+  const [drvs, setDrvs] = useState<{ id: string; name: string; type: string; mode: string }[]>([]);
+  const [newDrv, setNewDrv] = useState({ name: "", type: "printer", mode: "simulation" });
+  const [sched, setSched] = useState<{ uuid: string; rows: { from: string; to: string; target: string }[] } | null>(null);
+  const [outbox, setOutbox] = useState<{ id: string; kind: string; text: string; at: string; sent?: boolean }[]>([]);
+  const [newNotif, setNewNotif] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragType, setDragType] = useState<string | null>(null);
   const [previewW, setPreviewW] = useState(390);
@@ -100,7 +105,12 @@ export default function Dashboard() {
       survey: { question: "오늘 교육이 도움이 되셨나요?", appSlug: "" },
       numpad: { label: "숫자를 입력하세요", target: "" },
       productgrid: { datasetId: "", titleField: "이름", priceField: "가격", imageField: "이미지", columns: 2 },
-      html: { html: "<div>HTML</div>" }
+      html: { html: "<div>HTML</div>" },
+      calendar: {},
+      weather: { label: "현재 날씨", lat: 37.56, lon: 126.97 },
+      chart: { title: "차트", datasetId: "", labelField: "이름", valueField: "가격" },
+      tabs: { items: ["탭1", "탭2"] },
+      videolist: { urls: [] }
     };
     updPage(tpl.pages[tplPage].id, { components: [...tpl.pages[tplPage].components, { id, type, props: defaults[type] || {} }] });
     setSelComp(id);
@@ -188,7 +198,8 @@ export default function Dashboard() {
         showAppName: j.data.showAppName !== false,
         pwaIconUrl: j.data.pwaIconUrl ?? "",
         adminMenu: Array.isArray(j.data.adminMenu) && j.data.adminMenu.length ? j.data.adminMenu : [],
-        requireApprovedDevice: j.data.requireApprovedDevice === true
+        requireApprovedDevice: j.data.requireApprovedDevice === true,
+        notification: j.data.notification || { webhookUrl: "" }
       });
     }).catch(() => {});
     fetch("/api/admin/users").then(async (r) => {
@@ -206,6 +217,14 @@ export default function Dashboard() {
     fetch("/api/admin/datasets").then(async (r) => {
       const j = await r.json();
       if (j.success) setDss(j.data);
+    }).catch(() => {});
+    fetch("/api/admin/drivers").then(async (r) => {
+      const j = await r.json();
+      if (j.success) setDrvs(j.data);
+    }).catch(() => {});
+    fetch("/api/admin/outbox").then(async (r) => {
+      const j = await r.json();
+      if (j.success) setOutbox(j.data);
     }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
@@ -815,6 +834,93 @@ export default function Dashboard() {
             </table>
             {devices.length === 0 && <p className="text-gray-500 mt-2">등록된 장비 없음 — 런처 /device·/kiosk 화면을 열면 여기 표시됩니다</p>}
             </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mt-4 mb-2">시간대 스케줄 (장비별 화면 자동 전환)</h2>
+            <div className="max-w-2xl bg-white border rounded-2xl p-4 grid gap-2">
+              <select className={input} value={sched?.uuid || ""} onChange={(e) => {
+                const d = devices.find((x) => x.uuid === e.target.value);
+                let rows: { from: string; to: string; target: string }[] = [];
+                try { rows = JSON.parse((d as unknown as { schedule?: string })?.schedule || "[]"); } catch { rows = []; }
+                setSched({ uuid: e.target.value, rows: Array.isArray(rows) ? rows : [] });
+              }} aria-label="스케줄 장비 선택">
+                <option value="">장비 선택</option>
+                {devices.map((d) => <option key={d.id} value={d.uuid}>{d.name} ({d.code})</option>)}
+              </select>
+              {sched && (<>
+                {(sched.rows || []).map((r, i) => (
+                  <div key={i} className="flex gap-1 items-center">
+                    <input type="time" className={input} value={r.from} onChange={(e) => setSched({ ...sched, rows: sched.rows.map((x, j) => j === i ? { ...x, from: e.target.value } : x) })} aria-label="시작" />
+                    <span>~</span>
+                    <input type="time" className={input} value={r.to} onChange={(e) => setSched({ ...sched, rows: sched.rows.map((x, j) => j === i ? { ...x, to: e.target.value } : x) })} aria-label="종료" />
+                    <select className={`${input} flex-1`} value={r.target} onChange={(e) => setSched({ ...sched, rows: sched.rows.map((x, j) => j === i ? { ...x, target: e.target.value } : x) })} aria-label="시간대 화면">
+                      <option value="all">전체 앱</option>
+                      {cats.map((c) => <option key={c} value={`cat:${c}`}>{c} 전체</option>)}
+                      {apps.filter((a) => a.isActive !== false).map((a) => <option key={a.id} value={a.slug}>{a.name}</option>)}
+                      {tpls.filter((t) => t.status === "published").map((t) => <option key={t.id} value={`t:${t.slug}`}>{t.name} v{t.version}</option>)}
+                    </select>
+                    <button className={btn} onClick={() => setSched({ ...sched, rows: sched.rows.filter((_, j) => j !== i) })}>✕</button>
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <button className={btn} onClick={() => setSched({ ...sched, rows: [...(sched.rows || []), { from: "09:00", to: "18:00", target: "all" }] })}>+ 시간대</button>
+                  <button className={primary} onClick={() => setDevice(sched.uuid, { schedule: JSON.stringify(sched.rows) } as unknown as { status?: string }, "스케줄 저장됨")}>스케줄 저장</button>
+                </div>
+              </>)}
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mt-4 mb-2">원격 명령 (재시작·캐시비우기·새로고침)</h2>
+            <div className="max-w-2xl bg-white border rounded-2xl p-4 flex flex-wrap gap-2">
+              <select className={input} id="cmd-dev" aria-label="명령 대상 장비">
+                {devices.filter((d) => d.status === "approved").map((d) => <option key={d.id} value={d.uuid}>{d.name} ({d.code})</option>)}
+              </select>
+              {(["refresh", "clearCache", "reboot"] as const).map((c) => (
+                <button key={c} className={btn} onClick={() => {
+                  const el = document.getElementById("cmd-dev") as HTMLSelectElement | null;
+                  if (!el?.value) { notify("장비를 선택하세요", false); return; }
+                  setDevice(el.value, { pendingCommand: c } as unknown as { status?: string }, `명령 전송됨: ${c}`);
+                }}>{c === "refresh" ? "새로고침" : c === "clearCache" ? "캐시비우기" : "재시작"}</button>
+              ))}
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mt-4 mb-2">하드웨어 드라이버 (시뮬레이션)</h2>
+            <div className="max-w-2xl bg-white border rounded-2xl p-4 grid gap-2">
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target as HTMLFormElement);
+                const { ok, j } = await api("/api/admin/drivers", {
+                  method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ name: String(fd.get("name") || ""), type: String(fd.get("type") || "etc"), mode: String(fd.get("mode") || "simulation") })
+                });
+                result(ok, "드라이버 등록됨", j);
+                if (ok) { (e.target as HTMLFormElement).reset(); load(); }
+              }} className="flex flex-wrap gap-2">
+                <input name="name" className={`${input} flex-1 min-w-[120px]`} placeholder="이름 (예: 영수증 프린터)" aria-label="드라이버 이름" />
+                <select name="type" className={input} aria-label="종류">
+                  <option value="printer">printer</option><option value="payment">payment</option>
+                  <option value="scanner">scanner</option><option value="etc">etc</option>
+                </select>
+                <select name="mode" className={input} aria-label="모드">
+                  <option value="simulation">simulation</option><option value="real">real</option>
+                </select>
+                <button className={primary}>등록</button>
+              </form>
+              <ul className="grid gap-1">
+                {drvs.map((d) => (
+                  <li key={d.id} className="flex items-center gap-2 text-[clamp(13px,2vw,15px)] border-b py-2">
+                    <span className="flex-1"><b>{d.name}</b> · {d.type} · {d.mode}</span>
+                    <button className={btn} onClick={async () => {
+                      const r = await fetch("/api/device/driver", {
+                        method: "POST", headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ uuid: "admin-test", driverId: d.id, command: "test" })
+                      });
+                      const j = await r.json().catch(() => ({}));
+                      notify(r.ok && j.success ? `실행됨: ${j.data?.result}` : (j.error?.message ?? "실패"), r.ok && j.success);
+                    }}>테스트 실행</button>
+                    <button className={btn} onClick={async () => {
+                      await fetch(`/api/admin/drivers?id=${d.id}`, { method: "DELETE" });
+                      load();
+                    }}>삭제</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </section>
         )}
 
@@ -852,6 +958,57 @@ export default function Dashboard() {
         {tab === "templates" && (
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">템플릿 (키오스크 화면 에디터)</h1>
+            <div className="bg-white border rounded-2xl p-4 mb-4">
+              <b className="text-[clamp(15px,2vw,17px)]">샘플 마켓 (원클릭 생성)</b>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {[
+                  { name: "카페 주문 샘플", slug: `sample-cafe-${Date.now().toString(36)}`, category: "전체", industry: "CAFE", pages: [
+                    { id: "p1", title: "홈", components: [
+                      { id: "c1", type: "appbar", props: { title: "무인카페", bg: "#7C2D12", color: "#FFFFFF", size: 20 } },
+                      { id: "c2", type: "ticker", props: { text: "신메뉴 출시! 전 음료 10% 할인", bg: "#111111", color: "#FFFFFF", size: 15 } },
+                      { id: "c3", type: "text", props: { content: "메뉴를 골라 담아보세요", size: 18, color: "#111111" } },
+                      { id: "c4", type: "button", props: { label: "주문 시작", bg: "#C2410C", color: "#FFFFFF", size: 22, height: 64, target: "p2", actions: [] } }
+                    ]},
+                    { id: "p2", title: "완료", components: [
+                      { id: "c5", type: "text", props: { content: "주문이 접수되었습니다", size: 22, color: "#111111" } },
+                      { id: "c6", type: "survey", props: { question: "주문이 편했나요?" } },
+                      { id: "c7", type: "nav", props: { label: "처음으로", target: "/" } }
+                    ] }
+                  ] },
+                  { name: "도서관 안내 샘플", slug: `sample-lib-${Date.now().toString(36)}`, category: "전체", industry: "LIBRARY", pages: [
+                    { id: "p1", title: "홈", components: [
+                      { id: "c1", type: "appbar", props: { title: "스마트도서관", bg: "#1D4ED8", color: "#FFFFFF", size: 20 } },
+                      { id: "c2", type: "text", props: { content: "대출·반납 안내", size: 20, color: "#111111" } },
+                      { id: "c3", type: "button", props: { label: "대출하기", bg: "#1D4ED8", color: "#FFFFFF", size: 22, height: 64, target: "", actions: [{ type: "TOAST", text: "바코드를 스캔하세요" }] } },
+                      { id: "c4", type: "quiz", props: { question: "대출 기간은?", options: ["7일", "14일"], answer: 1 } }
+                    ]}
+                  ] },
+                  { name: "헬스케어 측정 샘플", slug: `sample-health-${Date.now().toString(36)}`, category: "전체", industry: "HEALTH", pages: [
+                    { id: "p1", title: "홈", components: [
+                      { id: "c1", type: "appbar", props: { title: "건강 측정", bg: "#0d9488", color: "#FFFFFF", size: 20 } },
+                      { id: "c2", type: "progress", props: { label: "오늘 목표", value: 60, max: 100, bg: "#0d9488" } },
+                      { id: "c3", type: "numpad", props: { label: "회원 번호", target: "" } },
+                      { id: "c4", type: "survey", props: { question: "측정이 편했나요?" } }
+                    ]}
+                  ] }
+                ].map((s) => (
+                  <button key={s.name} className={btn} onClick={async () => {
+                    const { ok, j } = await api("/api/admin/templates", {
+                      method: "POST", headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ name: s.name, slug: s.slug, category: s.category })
+                    });
+                    if (!ok) { result(false, j.error?.message ?? "실패", j); return; }
+                    const nid = (j.data as { id: string }).id;
+                    const r2 = await api("/api/admin/templates", {
+                      method: "PATCH", headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ id: nid, industry: s.industry, pages: s.pages })
+                    });
+                    result(r2.ok, "샘플 생성됨 — 열어서 게시하세요", r2.j);
+                    if (r2.ok) load();
+                  }}>{s.name} 만들기</button>
+                ))}
+              </div>
+            </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">데이터셋 (엑셀 일괄등록)</h2>
             <div className="bg-white border rounded-2xl p-4 mb-4 grid gap-2">
               <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500">.xlsx/.csv 첫 행 헤더 (이름·가격·이미지·카테고리·재고), 500행까지. 상품그리드에서 바인딩. 샘플 양식을 받아 채운 뒤 업로드하세요.</p>
@@ -1163,12 +1320,12 @@ export default function Dashboard() {
                         notify("페이지 복제됨");
                       }}>📋 페이지 복제</button>
                     </div>
-                    {(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html"] as const).map((t) => (
+                    {(["text", "button", "image", "video", "nav", "appbar", "progress", "ticker", "quiz", "survey", "numpad", "productgrid", "html", "calendar", "weather", "chart", "tabs", "videolist"] as const).map((t) => (
                       <button key={t} draggable
                         onDragStart={(e) => { setDragType(t); e.dataTransfer.effectAllowed = "copy"; }}
                         onDragEnd={() => setDragType(null)}
                         onClick={() => addComp(t)} className={btn}>
-                        + {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : t === "html" ? "HTML" : "상품그리드"}</button>
+                        + {t === "text" ? "텍스트" : t === "button" ? "버튼" : t === "image" ? "이미지" : t === "video" ? "동영상" : t === "nav" ? "내비" : t === "appbar" ? "앱바" : t === "progress" ? "진행률" : t === "ticker" ? "티커" : t === "quiz" ? "퀴즈" : t === "survey" ? "설문" : t === "numpad" ? "숫자패드" : t === "html" ? "HTML" : t === "calendar" ? "달력" : t === "weather" ? "날씨" : t === "chart" ? "차트" : t === "tabs" ? "탭메뉴" : t === "videolist" ? "동영상목록" : "상품그리드"}</button>
                     ))}
                     {tpl.pages[tplPage].components.map((c, ci) => (
                       <div key={c.id} id={`ec-${c.id}`} draggable
@@ -1298,6 +1455,33 @@ export default function Dashboard() {
                             <input className={`${input} flex-1`} placeholder="이미지 필드" value={String(c.props.imageField ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { imageField: e.target.value })} aria-label="이미지 필드" />
                           </div>
                         </>)}
+                        {c.type === "calendar" && (
+                          <p className="text-[clamp(12px,1.5vw,14px)] text-gray-500">달력 (당월 자동 표시, 설정 불필요)</p>
+                        )}
+                        {c.type === "weather" && (<>
+                          <input className={input} placeholder="라벨" value={String(c.props.label ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { label: e.target.value })} />
+                          <div className="flex gap-1">
+                            <input className={`${input} flex-1`} placeholder="위도" value={String(c.props.lat ?? 37.56)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { lat: e.target.value })} aria-label="위도" />
+                            <input className={`${input} flex-1`} placeholder="경도" value={String(c.props.lon ?? 126.97)} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { lon: e.target.value })} aria-label="경도" />
+                          </div>
+                        </>)}
+                        {c.type === "chart" && (<>
+                          <input className={input} placeholder="제목" value={String(c.props.title ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { title: e.target.value })} />
+                          <select className={input} value={String(c.props.datasetId ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { datasetId: e.target.value })} aria-label="차트 데이터셋">
+                            <option value="">데이터셋 선택</option>
+                            {dss.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.total}행)</option>)}
+                          </select>
+                          <div className="flex gap-1">
+                            <input className={`${input} flex-1`} placeholder="라벨 필드" value={String(c.props.labelField ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { labelField: e.target.value })} aria-label="라벨 필드" />
+                            <input className={`${input} flex-1`} placeholder="값 필드" value={String(c.props.valueField ?? "")} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { valueField: e.target.value })} aria-label="값 필드" />
+                          </div>
+                        </>)}
+                        {c.type === "tabs" && (
+                          <input className={input} placeholder="탭 (쉼표 구분)" value={Array.isArray(c.props.items) ? (c.props.items as string[]).join(",") : ""} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { items: e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 8) })} />
+                        )}
+                        {c.type === "videolist" && (
+                          <textarea className={`${input} min-h-[80px] font-mono`} placeholder="동영상 URL (줄바꿈 구분, 최대 6)" value={Array.isArray(c.props.urls) ? (c.props.urls as string[]).join("\n") : ""} onChange={(e) => updComp(tpl.pages[tplPage].id, c.id, { urls: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 6) })} aria-label="동영상 URL 목록" />
+                        )}
                         {c.type === "button" && (
                           <div className="grid gap-1 border rounded-lg p-2">
                             <b className="text-[clamp(12px,1.5vw,14px)]">클릭 액션 체인 (순차 실행, 비우면 target 이동)</b>
@@ -1308,9 +1492,9 @@ export default function Dashboard() {
                                   arr[ai] = { ...arr[ai], type: e.target.value };
                                   updComp(tpl.pages[tplPage].id, c.id, { actions: arr });
                                 }} aria-label="액션 종류">
-                                  {["NAVIGATE", "POPUP", "TOAST", "SPEAK", "API_CALL", "STATE_UPDATE", "STATE_RESET"].map((t) => <option key={t} value={t}>{t}</option>)}
+                                  {["NAVIGATE", "POPUP", "TOAST", "SPEAK", "API_CALL", "STATE_UPDATE", "STATE_RESET", "DRIVER_EXECUTE", "WAIT_HARDWARE"].map((t) => <option key={t} value={t}>{t}</option>)}
                                 </select>
-                                <input className={`${input} flex-[2]`} placeholder="text/target/url/key (종류별)" value={String(a.text ?? a.target ?? a.url ?? a.key ?? "")}
+                                <input className={`${input} flex-[2]`} placeholder="text/target/url/key/driverId (종류별)" value={String(a.text ?? a.target ?? a.url ?? a.key ?? (a as { driverId?: string }).driverId ?? (a as { hardware?: string }).hardware ?? "")}
                                   onChange={(e) => {
                                     const v = e.target.value;
                                     const arr = [...(((c.props.actions as unknown[]) || []) as Record<string, unknown>[])];
@@ -1318,6 +1502,8 @@ export default function Dashboard() {
                                     if (a.type === "NAVIGATE") cur.target = v;
                                     else if (a.type === "API_CALL") cur.url = v;
                                     else if (a.type === "STATE_UPDATE") cur.key = v;
+                                    else if (a.type === "DRIVER_EXECUTE") cur.driverId = v;
+                                    else if (a.type === "WAIT_HARDWARE") cur.hardware = v;
                                     else cur.text = v;
                                     arr[ai] = cur;
                                     updComp(tpl.pages[tplPage].id, c.id, { actions: arr });
@@ -1573,6 +1759,25 @@ export default function Dashboard() {
                   onChange={(e) => saveSettings({ requireApprovedDevice: e.target.checked }, e.target.checked ? "승인된 장비만 수집" : "전체 수집으로 변경")} />
                 승인된 장비의 이벤트만 수집 (미승인 차단)
               </label>
+            </div>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">알림 (에러 발생 시 웹훅)</h2>
+            <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4 grid gap-2">
+              <input className={input} placeholder="웹훅 URL (비우면 내부 보관함만)" value={(settings.notification as { webhookUrl?: string } | undefined)?.webhookUrl || ""}
+                onChange={(e) => setSettings({ ...settings, notification: { webhookUrl: e.target.value } })} aria-label="웹훅 URL" />
+              <div className="flex gap-2">
+                <button className={primary} onClick={() => saveSettings({ notification: settings.notification } as Partial<Settings>, "알림 설정 저장됨")}>알림 저장</button>
+                <button className={btn} onClick={async () => {
+                  const r = await fetch("/api/admin/outbox/test", { method: "POST" });
+                  const j = await r.json().catch(() => ({}));
+                  notify(r.ok && j.success ? `테스트 발송됨 (전송 ${j.data?.sent ? "성공" : "보관"})` : "실패", r.ok && j.success);
+                  load();
+                }}>테스트 발송</button>
+              </div>
+              <ul className="grid gap-1">
+                {outbox.map((o) => (
+                  <li key={o.id} className="text-[clamp(12px,1.5vw,14px)] border-b py-1">[{o.kind}] {o.text} · {new Date(o.at).toLocaleString("ko-KR")} {o.sent === true ? "(전송됨)" : o.sent === false ? "(보관)" : ""}</li>
+                ))}
+              </ul>
             </div>
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">허용 도메인 (앱 등록 Allowlist)</h2>
             <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4">

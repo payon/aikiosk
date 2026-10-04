@@ -29,6 +29,10 @@ export default function KioskPage() {
     setUuid(id);
     const screen = `${window.innerWidth}x${window.innerHeight}`;
     let stop = false;
+    const kst = () => {
+      const d = new Date(Date.now() + 9 * 3600 * 1000);
+      return d.toISOString().slice(11, 16);
+    };
     const sync = async () => {
       try {
         const reg = await fetch("/api/device/register", {
@@ -40,12 +44,44 @@ export default function KioskPage() {
         const st = await fetch(`/api/device/status?uuid=${encodeURIComponent(id)}`).then((r) => r.json());
         if (!st.success || stop) return;
         setStatus(st.data.status);
-        await fetch("/api/device/heartbeat", {
+        // 원격 명령 실행 (재시작/캐시비우기/새로고침)
+        const hb = await fetch("/api/device/heartbeat", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ uuid: id, screen: `${window.innerWidth}x${window.innerHeight}` })
-        }).catch(() => {});
-        if (st.data.status === "approved") {
-          const target = (st.data.assignedSlug || "").trim() || "all";
+        }).then((r) => r.json()).catch(() => null);
+        const cmd = hb?.success ? hb.data?.command : "";
+        if (cmd) {
+          if (cmd === "refresh" || cmd === "reboot") window.location.reload();
+          else if (cmd === "clearCache") {
+            try { localStorage.removeItem("rk_queue"); } catch { /* ignore */ }
+            try {
+              if ("caches" in window) caches.keys().then((ks) => ks.forEach((k) => caches.delete(k))).catch(() => {});
+            } catch { /* ignore */ }
+            window.location.reload();
+          }
+          try {
+            await fetch("/api/device/heartbeat", {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ uuid: id, ackCommand: cmd })
+            });
+          } catch { /* ignore */ }
+          return;
+        }
+        if (st.data.status !== "approved") return;
+        // 스케줄 우선 (시간대별 화면), 없으면 배정 화면
+        let target = (st.data.assignedSlug || "").trim() || "all";
+        try {
+          const sched = JSON.parse(st.data.schedule || "[]");
+          if (Array.isArray(sched) && sched.length) {
+            const now = kst();
+            const hit = sched.find((s) => s.from <= now && now < s.to);
+            if (!hit) {
+              setAppName("스케줄 대기 중 (해당 시간 배정 없음)");
+              return;
+            }
+            target = hit.target;
+          }
+        } catch { /* 배정 화면 사용 */ }
           if (target === "all") {
             router.replace("/");
             return;
@@ -68,7 +104,6 @@ export default function KioskPage() {
           if (app.openMode === "direct") window.location.href = app.targetUrl;
           else router.replace(`/apps/${target}`);
           return;
-        }
       } catch { /* 다음 폴링 */ }
     };
     sync();
