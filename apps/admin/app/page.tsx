@@ -29,7 +29,7 @@ interface AuditRow { id: string; actorId: string; action: string; target?: strin
 interface Perm { email: string; slug: string; accessLevel: string; }
 interface Settings { platformName: string; primaryColor: string; logoUrl: string; announcement: string; idleTimeoutMin: number; menuOrder: string[]; backgroundType: string; backgroundColor: string; backgroundImage: string; allowedDomains: string[]; gridDensity: string; gridCols: { mobile: number; tablet: number; desktop: number; kiosk: number }; showAppName: boolean; pwaIconUrl: string; adminMenu: { id: string; label: string }[]; requireApprovedDevice: boolean; notification?: { webhookUrl?: string }; }
 interface TplList { id: string; slug: string; name: string; category?: string; status: string; version: number; pageCount: number; updatedAt: string; }
-interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: number[]; warnings?: { message: string }[]; industry?: string; tags?: string; runMode?: string; }
+interface TplFull extends TplList { pages: TplPage[]; completePageId?: string | null; versions?: (number | { version: number })[]; warnings?: { message: string }[]; industry?: string; tags?: string; runMode?: string; }
 interface DsList { id: string; name: string; columns: string[]; total: number; }
 interface TplPage { id: string; title: string; bg?: string; bgImage?: string; components: TplComp[]; }
 interface TplComp { id: string; type: string; props: Record<string, unknown>; }
@@ -1184,9 +1184,10 @@ export default function Dashboard() {
                     </select></label>
                 </div>
                 {(tpl.versions || []).length > 0 && (
-                  <div className="text-[clamp(13px,2vw,15px)]">버전: {(tpl.versions || []).map((v) => (
-                    <button key={v} className="border rounded-lg px-2 py-1 mr-1 min-h-[48px]" onClick={() => rollbackTpl(tpl.id, v)}>v{v}로 롤백</button>
-                  ))}</div>
+                  <div className="text-[clamp(13px,2vw,15px)]">버전: {(tpl.versions || []).map((v: number | { version: number }) => {
+                    const n = typeof v === "number" ? v : v.version;
+                    return <button key={n} className="border rounded-lg px-2 py-1 mr-1 min-h-[48px]" onClick={() => rollbackTpl(tpl.id, n)}>v{n}로 롤백</button>;
+                  })}</div>
                 )}
                 <div className="flex gap-2 items-center flex-wrap">
                   <b>미리보기</b>
