@@ -1671,7 +1671,7 @@ export default function Dashboard() {
                       <input className={`${input} flex-1`} value={settings.backgroundColor} onChange={(e) => setSettings({ ...settings, backgroundColor: e.target.value })} />
                     </span>
                   ) : (
-                    <input className={`${input} flex-1`} placeholder="/uploads/배너.png 또는 https://…" value={settings.backgroundImage} onChange={(e) => setSettings({ ...settings, backgroundImage: e.target.value })} />
+                    <input className={`${input} flex-1`} placeholder="/uploads/배너.png 또는 https://…" value={settings.backgroundImage} onChange={(e) => setSettings({ ...settings, backgroundImage: e.target.value, backgroundType: e.target.value ? "image" : settings.backgroundType })} />
                   )}
                 </span>
               </label>
@@ -1683,7 +1683,7 @@ export default function Dashboard() {
                       const f = e.target.files?.[0];
                       if (!f) return;
                       const url = await uploadIcon(f, 1920);
-                      if (url) { setSettings((s) => ({ ...s, backgroundImage: url })); saveSettings({ backgroundImage: url }, "배경 저장됨 → 런처에 반영"); }
+                      if (url) { setSettings((s) => ({ ...s, backgroundImage: url, backgroundType: "image" })); saveSettings({ backgroundImage: url, backgroundType: "image" }, "배경 저장됨 → 런처에 반영"); }
                       e.target.value = "";
                     }} />
                 </label>
