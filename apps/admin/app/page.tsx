@@ -140,14 +140,33 @@ export default function Dashboard() {
   const [moveTo, setMoveTo] = useState("전체");
   const [uploading, setUploading] = useState(false);
 
-  async function uploadIcon(file: File): Promise<string | null> {
+  async function uploadIcon(file: File, maxDim = 512): Promise<string | null> {
     setUploading(true);
     try {
+      // 큰 사진은 업로드 전 축소 (배경 1920 / 아이콘 512)
+      let blob: Blob = file;
+      if (file.type !== "image/svg+xml") {
+        try {
+          const img = await createImageBitmap(file);
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          if (scale < 1) {
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const out = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", 0.85));
+              if (out) blob = new File([out], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" });
+            }
+          }
+        } catch { /* 원본 사용 */ }
+      }
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const r = new FileReader();
         r.onload = () => resolve(r.result as string);
         r.onerror = reject;
-        r.readAsDataURL(file);
+        r.readAsDataURL(blob);
       });
       const r = await fetch("/api/admin/upload", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -1657,13 +1676,13 @@ export default function Dashboard() {
                 </span>
               </label>
               {settings.backgroundType === "image" && (
-                <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">배경 이미지 업로드
+                <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">배경 이미지 업로드 (자동 축소)
                   <input type="file" accept="image/png,image/jpeg,image/webp" className={`${input} pt-2`}
                     disabled={uploading}
                     onChange={async (e) => {
                       const f = e.target.files?.[0];
                       if (!f) return;
-                      const url = await uploadIcon(f);
+                      const url = await uploadIcon(f, 1920);
                       if (url) { setSettings((s) => ({ ...s, backgroundImage: url })); saveSettings({ backgroundImage: url }, "배경 저장됨 → 런처에 반영"); }
                       e.target.value = "";
                     }} />
@@ -1696,7 +1715,10 @@ export default function Dashboard() {
             <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">로고·PWA 아이콘</h2>
             <div className="max-w-lg bg-white border rounded-2xl p-4 mb-4 grid gap-2">
               <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">헤더 로고 URL
-                <input className={`${input} w-full`} value={settings.logoUrl} onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })} />
+                <span className="flex gap-2 items-center">
+                  {settings.logoUrl && <img src={settings.logoUrl} alt="로고 미리보기" width={48} height={48} className="w-12 h-12 object-contain border rounded-lg" />}
+                  <input className={`${input} flex-1`} value={settings.logoUrl} onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })} aria-label="헤더 로고 URL" />
+                </span>
               </label>
               <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">로고 이미지 업로드
                 <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`}
