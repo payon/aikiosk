@@ -1664,7 +1664,7 @@ export default function Dashboard() {
                       const f = e.target.files?.[0];
                       if (!f) return;
                       const url = await uploadIcon(f);
-                      if (url) setSettings((s) => ({ ...s, backgroundImage: url }));
+                      if (url) { setSettings((s) => ({ ...s, backgroundImage: url })); saveSettings({ backgroundImage: url }, "배경 저장됨 → 런처에 반영"); }
                       e.target.value = "";
                     }} />
                 </label>

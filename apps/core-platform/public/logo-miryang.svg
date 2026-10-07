@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#0F766E"/>
+  <path d="M20 84 L48 40 L66 66 L78 50 L108 84 Z" fill="#FFFFFF" opacity="0.92"/>
+  <circle cx="88" cy="34" r="10" fill="#FCD34D"/>
+  <text x="64" y="110" font-size="20" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-weight="bold">밀양시</text>
+</svg>
