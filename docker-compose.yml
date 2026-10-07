@@ -32,7 +32,7 @@ services:
       NEXT_PUBLIC_ADMIN_URL: /admin
       ALLOW_LOCAL_APPS: "false"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 필수}
-    ports: ["4500:4500"]
+    ports: ["127.0.0.1:4500:4500"]
     depends_on: [backend, admin, library, aiplatform, healthcare]
     restart: unless-stopped
 
