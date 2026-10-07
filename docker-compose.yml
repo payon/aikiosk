@@ -8,11 +8,11 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 필수}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET 필수}
-      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-rustkorea.cloud}
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-senior.rustkorea.cloud}
       LOCAL_APPS: "false"
       ALLOW_LOCAL_APPS: "false"
     expose: ["4501"]
-    volumes: ["uploads-data:/srv/app/uploads"]
+    volumes: ["uploads-data:/srv/app/uploads", "app-data:/srv/app/data"]
     restart: unless-stopped
 
   launcher:
@@ -21,14 +21,14 @@ services:
       args:
         API_INTERNAL_URL: http://backend:4501
         ADMIN_INTERNAL_URL: http://admin:4502
-        NEXT_PUBLIC_PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-rustkorea.cloud}
+        NEXT_PUBLIC_PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-senior.rustkorea.cloud}
         NEXT_PUBLIC_ADMIN_URL: /admin
     environment:
       PORT: "4500"
       NODE_ENV: production
       API_INTERNAL_URL: http://backend:4501
       ADMIN_INTERNAL_URL: http://admin:4502
-      NEXT_PUBLIC_PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-rustkorea.cloud}
+      NEXT_PUBLIC_PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-senior.rustkorea.cloud}
       NEXT_PUBLIC_ADMIN_URL: /admin
       ALLOW_LOCAL_APPS: "false"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL 필수}
@@ -76,3 +76,4 @@ services:
 
 volumes:
   uploads-data:
+  app-data:
