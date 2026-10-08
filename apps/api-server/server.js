@@ -395,7 +395,10 @@ app.post("/api/admin/upload", requireAdmin, async (req, res) => {
     const text = buf.toString("utf8");
     if (/<script|on\w+\s*=|javascript:/i.test(text)) return fail(res, "VALIDATION", "SVG에 스크립트 불가", 400);
   }
-  const base = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // 원본 파일명 유지 (앞에 시간 접두사로 중복 방지) — 어드민에서 찾기 쉽게
+  const rawBase = (parsed.data.filename || "file").split("/").pop() || "file";
+  const cleanBase = rawBase.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-zA-Z0-9가-힣_-]/g, "").slice(0, 60) || "file";
+  const base = `${Date.now()}-${cleanBase}`;
   // webp로 규격 변환 (벡터 SVG 제외). 실패 시 원본 저장.
   let stored = `${base}.${UPLOAD_MIMES[m[1]]}`;
   if (m[1] !== "image/svg+xml" && m[1] !== "image/webp") {

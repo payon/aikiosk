@@ -655,9 +655,33 @@ export default function Dashboard() {
                 <div className="absolute inset-0 bg-black/40" onClick={() => setEditing(null)} />
                 <form onSubmit={saveEdit} className="relative bg-white rounded-2xl p-4 grid gap-2 w-full max-w-lg">
                   <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold">앱 수정</h2>
-                  {(["name", "slug", "targetUrl", "iconUrl", "description"] as const).map((k) => (
+                  {(["name", "slug", "targetUrl", "description"] as const).map((k) => (
                     <input key={k} className={input} placeholder={k} value={editing[k] ?? ""} onChange={(e) => setEditing({ ...editing, [k]: e.target.value })} />
                   ))}
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">앱 아이콘 (업로드 시 512px 자동 축소)
+                    <span className="flex gap-2 items-center">
+                      {editing.iconUrl && <img src={editing.iconUrl} alt="아이콘 미리보기" width={48} height={48} className="w-12 h-12 object-contain border rounded-lg" />}
+                      <input className={`${input} flex-1`} placeholder="iconUrl" value={editing.iconUrl} onChange={(e) => setEditing({ ...editing, iconUrl: e.target.value })} aria-label="앱 아이콘 URL" />
+                    </span>
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${input} pt-2`} disabled={uploading}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const url = await uploadIcon(f, 512);
+                        if (url) setEditing({ ...editing, iconUrl: url });
+                        e.target.value = "";
+                      }} aria-label="앱 아이콘 업로드" />
+                  </label>
+                  <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">카드 배경 이미지 (업로드 시 1280px 자동 축소)
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className={`${input} pt-2`} disabled={uploading}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const url = await uploadIcon(f, 1280);
+                        if (url) setEditing({ ...editing, bgImage: url, bgType: "image" });
+                        e.target.value = "";
+                      }} aria-label="카드 배경 업로드" />
+                  </label>
                   <label className="grid gap-1 text-[clamp(14px,2vw,16px)]">소속 카테고리 (메뉴에 먼저 생성)
                     <select className={input} value={editing.category || "전체"} onChange={(e) => setEditing({ ...editing, category: e.target.value })} aria-label="소속 카테고리">
                       {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
