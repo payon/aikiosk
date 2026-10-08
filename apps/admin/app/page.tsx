@@ -62,6 +62,22 @@ export default function Dashboard() {
   const [sched, setSched] = useState<{ uuid: string; rows: { from: string; to: string; target: string }[] } | null>(null);
   const [outbox, setOutbox] = useState<{ id: string; kind: string; text: string; at: string; sent?: boolean }[]>([]);
   const [newNotif, setNewNotif] = useState("");
+  const [profile, setProfile] = useState({ email: "", currentPassword: "", newPassword: "" });
+
+  async function saveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    const body: Record<string, string> = {};
+    if (profile.email.trim()) body.email = profile.email.trim();
+    if (profile.newPassword) {
+      body.newPassword = profile.newPassword;
+      body.currentPassword = profile.currentPassword;
+    }
+    const { ok, j } = await api("/api/admin/profile", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+    });
+    result(ok, ok ? `프로필 저장됨${body.email ? " — 다음 로그인부터 적용" : ""}` : (j.error?.message ?? "실패"), j);
+    if (ok) { setProfile({ email: "", currentPassword: "", newPassword: "" }); load(); }
+  }
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragType, setDragType] = useState<string | null>(null);
   const [previewW, setPreviewW] = useState(390);
@@ -1640,6 +1656,13 @@ export default function Dashboard() {
         {tab === "settings" && (
           <section>
             <h1 className="text-[clamp(24px,3vw,36px)] font-bold mb-4">플랫폼 설정</h1>
+            <h2 className="text-[clamp(18px,2.5vw,24px)] font-bold mb-2">내 프로필 (이메일·비밀번호 변경)</h2>
+            <form onSubmit={saveProfile} className="grid gap-2 max-w-lg bg-white border rounded-2xl p-4 mb-4">
+              <input className={input} placeholder="새 이메일 (비우면 유지)" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} aria-label="새 이메일" />
+              <input className={input} placeholder="현재 비밀번호 (변경 시 필수)" type="password" value={profile.currentPassword} onChange={(e) => setProfile({ ...profile, currentPassword: e.target.value })} aria-label="현재 비밀번호" />
+              <input className={input} placeholder="새 비밀번호 (8자 이상, 비우면 유지)" type="password" value={profile.newPassword} onChange={(e) => setProfile({ ...profile, newPassword: e.target.value })} aria-label="새 비밀번호" />
+              <button className={primary}>프로필 저장</button>
+            </form>
             <div className="grid gap-2 max-w-lg bg-white border rounded-2xl p-4 mb-4">
               <label className="text-[clamp(14px,2vw,16px)]">플랫폼 이름 (런처 타이틀)
                 <input className={`${input} w-full mt-1`} value={settings.platformName} onChange={(e) => setSettings({ ...settings, platformName: e.target.value })} />

@@ -1498,6 +1498,60 @@ app.post("/api/admin/outbox/test", requireAdmin, async (req, res) => {
   return ok(res, row);
 });
 
+// PATCH /api/admin/profile {email?, currentPassword?, newPassword?} — 본인 프로필 변경
+app.patch("/api/admin/profile", requireAdmin, async (req, res) => {
+  const parsed = z.object({
+    email: z.string().email("이메일 형식 오류").max(100).optional(),
+    currentPassword: z.string().max(100).optional(),
+    newPassword: z.string().min(8, "새 비밀번호 8자 이상").max(100).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return fail(res, "VALIDATION", zMsg(parsed), 400);
+  const { email, currentPassword, newPassword } = parsed.data;
+  if (!email && !newPassword) return fail(res, "VALIDATION", "변경 항목 없음", 400);
+  if (newPassword && !currentPassword) return fail(res, "VALIDATION", "현재 비밀번호 필요", 400);
+  if (prisma) {
+    try {
+      const me = await prisma.user.findUnique({ where: { id: req.claims.userId } });
+      if (!me) return fail(res, "NOT_FOUND", "사용자 없음", 404);
+      const data = {};
+      if (email && email !== me.email) {
+        const dup = await prisma.user.findUnique({ where: { email } });
+        if (dup) return fail(res, "CONFLICT", "이메일 중복", 409);
+        data.email = email;
+      }
+      if (newPassword) {
+        if (!(await bcrypt.compare(currentPassword, me.passwordHash))) {
+          await audit(req.claims.userId, "profile.password", undefined, "fail");
+          return fail(res, "UNAUTH", "현재 비밀번호 불일치", 401);
+        }
+        data.passwordHash = await bcrypt.hash(newPassword, 12);
+      }
+      const updated = await prisma.user.update({ where: { id: req.claims.userId }, data });
+      await audit(req.claims.userId, "profile.update", updated.email, "success");
+      return ok(res, publicUser(updated));
+    } catch (e) {
+      if (String((e && e.message) || "").includes("Unique")) return fail(res, "CONFLICT", "이메일 중복", 409);
+      throw e;
+    }
+  }
+  const me = usersMem.find((x) => x.id === req.claims.userId);
+  if (!me) return fail(res, "NOT_FOUND", "사용자 없음", 404);
+  if (email && email !== me.email) {
+    if (usersMem.some((x) => x.email === email)) return fail(res, "CONFLICT", "이메일 중복", 409);
+    me.email = email;
+  }
+  if (newPassword) {
+    if (!(await bcrypt.compare(currentPassword, me.passwordHash))) {
+      await audit(req.claims.userId, "profile.password", undefined, "fail");
+      return fail(res, "UNAUTH", "현재 비밀번호 불일치", 401);
+    }
+    me.passwordHash = await bcrypt.hash(newPassword, 10);
+  }
+  persist();
+  await audit(req.claims.userId, "profile.update", me.email, "success");
+  return ok(res, publicUser(me));
+});
+
 // ----- Admin: users -----
 function publicUser(u) {
   return { id: u.id, email: u.email, role: u.role, createdAt: u.createdAt };
